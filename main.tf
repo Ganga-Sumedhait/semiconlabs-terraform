@@ -27,7 +27,9 @@ resource "aws_instance" "CentOS8-AMD" {
   subnet_id              = "subnet-01e7e581424a68b10"
   availability_zone      = "ap-south-1a"
   vpc_security_group_ids = [data.aws_security_group.TerraformSecurityGroup.id]
-  iam_instance_profile   = aws_iam_instance_profile.ssm_profile.name
+  # iam_instance_profile   = aws_iam_instance_profile.ssm_profile.name
+  iam_instance_profile = "LabSSMRole"
+
 
   # Updated user data script
   user_data = <<-EOF
