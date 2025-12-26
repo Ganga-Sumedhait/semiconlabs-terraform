@@ -40,31 +40,34 @@ resource "aws_instance" "CentOS8-AMD" {
 
     echo "========== LAB BOOTSTRAP START =========="
 
-    sleep 30
+   # Wait for network
+until ping -c1 8.8.8.8 &>/dev/null; do
+  echo "[BOOTSTRAP] Waiting for network..."
+  sleep 5
+done
 
-    echo "[1/6] Restarting critical services"
-    systemctl restart sssd || true
-    systemctl restart dcvserver || true
-    systemctl restart sshd || true
+# Ensure sshd is running
+systemctl enable sshd
+systemctl restart sshd
 
-    echo "[2/6] Clearing SSSD cache for new AD users"
-    sss_cache -E || true
+# Ensure DCV is running
+systemctl enable dcvserver
+systemctl restart dcvserver
 
-    echo "[3/6] Checking DCV server status"
-    dcv list-servers || true
+# Give services time
+sleep 20
 
-    echo "[4/6] Fetching instance metadata"
-    INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-    REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+REGION="ap-south-1"
 
-    echo "[5/6] Tagging instance as READY"
-    aws ec2 create-tags \
-      --region "$REGION" \
-      --resources "$INSTANCE_ID" \
-      --tags Key=LabBootstrap,Value=READY
+echo "[BOOTSTRAP] Signaling READY for $INSTANCE_ID"
 
-    echo "[6/6] Bootstrap completed successfully"
-    echo "========== LAB BOOTSTRAP END =========="
+aws ec2 create-tags \
+  --region $REGION \
+  --resources $INSTANCE_ID \
+  --tags Key=LabBootstrap,Value=READY
+
+echo "[BOOTSTRAP] DONE"
   EOF
   tags = {
     Name         = "${var.name}-${var.instance_name}-${var.suffix}"
