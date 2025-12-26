@@ -32,42 +32,51 @@ resource "aws_instance" "CentOS8-AMD" {
 
 
   user_data = <<-EOF
-    #!/bin/bash
-    set -e
+  #!/bin/bash
+set +e
 
-    LOG=/var/log/lab-bootstrap.log
-    exec > >(tee -a $LOG) 2>&1
+LOG=/var/log/lab-bootstrap.log
+exec > >(tee -a $LOG) 2>&1
 
-    echo "========== LAB BOOTSTRAP START =========="
+echo "========== LAB BOOTSTRAP START =========="
 
-   # Wait for network
-until ping -c1 8.8.8.8 &>/dev/null; do
-  echo "[BOOTSTRAP] Waiting for network..."
-  sleep 5
-done
+# Wait for cloud-init networking
+sleep 30
 
-# Ensure sshd is running
+# Ensure network is really up
+nm-online -t 60 || echo "NetworkManager timeout"
+
+# Install AWS CLI if missing
+if ! command -v aws >/dev/null 2>&1; then
+  echo "[BOOTSTRAP] Installing awscli"
+  dnf install -y awscli
+fi
+
+# Ensure SSH
 systemctl enable sshd
 systemctl restart sshd
 
-# Ensure DCV is running
+# Ensure DCV
 systemctl enable dcvserver
 systemctl restart dcvserver
 
-# Give services time
-sleep 20
+sleep 30
 
 INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
 REGION="ap-south-1"
 
-echo "[BOOTSTRAP] Signaling READY for $INSTANCE_ID"
+echo "[BOOTSTRAP] Instance ID: $INSTANCE_ID"
 
 aws ec2 create-tags \
   --region $REGION \
-  --resources $INSTANCE_ID \
+  --resources "$INSTANCE_ID" \
   --tags Key=LabBootstrap,Value=READY
 
-echo "[BOOTSTRAP] DONE"
+RC=$?
+echo "[BOOTSTRAP] Tagging exit code: $RC"
+
+echo "========== LAB BOOTSTRAP END =========="
+
   EOF
   tags = {
     Name         = "${var.name}-${var.instance_name}-${var.suffix}"
