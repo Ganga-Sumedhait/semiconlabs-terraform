@@ -1,6 +1,6 @@
 variable "keypair_name" {
   description = "EC2's Key Pair"
-  type    = string
+  type        = string
   # default = "Koushal-Manual_Server"
 }
 
@@ -13,8 +13,8 @@ variable "instance_name" {
 
 variable "ami_id" {
   description = "ami image"
-  type = string
-  default = "ami-0fc2776da09fb303e"
+  type        = string
+  default     = "ami-0ca677b07c3bf68e7"
 }
 
 variable "name" {
@@ -35,3 +35,32 @@ variable "suffix" {
   type        = string
   # default = "Koushal-Manual_"
 }
+
+#resource "aws_iam_instance_profile" "ssm_profile" {
+#  name = "ssm-profile"
+#  role = "AmazonSSMManagedInstanceCore"
+#}
+
+resource "aws_iam_role" "ssm_role" {
+  name = "LabSSMRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_attach" {
+  role       = aws_iam_role.ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ssm_profile" {
+  name = "LabSSMProfile"
+  role = aws_iam_role.ssm_role.name
+}
+
