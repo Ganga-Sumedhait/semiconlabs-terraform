@@ -40,37 +40,42 @@ exec > >(tee -a $LOG) 2>&1
 
 echo "========== LAB BOOTSTRAP START =========="
 
-# Wait for cloud-init + network (CentOS 8 specific)
-cloud-init status --wait || echo "cloud-init timeout"
-sleep 10
-nmcli networking connectivity check || echo "Network connectivity check failed"
+# Kill cloud-init if it's hanging
+systemctl stop cloud-init || true
+systemctl mask cloud-init || true
+rm -rf /var/lib/cloud/*
 
-# Ensure SSH is ready FIRST (before DCV)
+# Fix fstab - remove remote mounts
+sed -i '/nfs\|efs\|cifs/d' /etc/fstab
+
+# Wait for network
+for i in {1..30}; do
+  ping -c1 169.254.169.254 >/dev/null 2>&1 && break
+  sleep 5
+done
+
+# SSH FIRST - critical for your app
 systemctl enable sshd --now
-systemctl is-active --quiet sshd && echo "SSHD ready" || { echo "SSHD failed"; exit 1; }
+ss -tlnp | grep :22 && echo "SSHD listening" || { echo "SSHD failed"; exit 1; }
 
-# Install AWS CLI if missing (required for tagging)
-dnf install -y awscli || echo "AWS CLI install skipped"
+# Set multi-user (no graphical hangs)
+systemctl set-default multi-user.target
+systemctl isolate multi-user.target
 
-# DCV - wait for X11/graphical.target first
-systemctl set-default graphical.target
-systemctl isolate graphical.target || systemctl restart gdm
-sleep 15
-
-# Start DCV only AFTER graphical is up
+# DCV after SSH
+dnf install -y @dcvserver || echo "DCV package missing"
 systemctl enable dcvserver
-systemctl restart dcvserver
-systemctl is-active --quiet dcvserver && echo "DCV ready" || echo "DCV warning"
+systemctl restart dcvserver || echo "DCV start warning"
 
-# Tag instance as ready
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-REGION="ap-south-1"
+# Tag as ready
 aws ec2 create-tags \
-  --region $REGION \
-  --resources "$INSTANCE_ID" \
+  --region ap-south-1 \
+  --resources $(curl -s http://169.254.169.254/latest/meta-data/instance-id) \
   --tags Key=LabBootstrap,Value=READY
 
-echo "========== LAB BOOTSTRAP COMPLETE =========="
+echo "========== BOOTSTRAP COMPLETE =========="
+
+
 
 
   EOF
