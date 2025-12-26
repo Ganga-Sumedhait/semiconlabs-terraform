@@ -31,60 +31,40 @@ resource "aws_instance" "CentOS8-AMD" {
   iam_instance_profile = "LabSSMRole"
 
 
-  # Updated user data script
   user_data = <<-EOF
     #!/bin/bash
+    set -e
 
-    # sed -i 's/^PasswordAuthentication no$/PasswordAuthentication yes/' /etc/ssh/sshd_config
-    
-    # bash /root/.login-kb/remove.bash
-    # bash /root/.login-kb/login_ad.bash
-    # rm -f /root/.bash_history
-    # rm -f /home/centos/.bash_history
-    # rm -f /home/cloud-user/.bash_history
-    # echo "ad_gpo_access_control = disabled" >> /etc/sssd/sssd.conf
-
-    #!/bin/bash
-
-    LOG=/var/log/user-data.log
+    LOG=/var/log/lab-bootstrap.log
     exec > >(tee -a $LOG) 2>&1
 
+    echo "========== LAB BOOTSTRAP START =========="
+
+    sleep 30
+
+    echo "[1/6] Restarting critical services"
+    systemctl restart sssd || true
+    systemctl restart dcvserver || true
+    systemctl restart sshd || true
+
+    echo "[2/6] Clearing SSSD cache for new AD users"
+    sss_cache -E || true
+
+    echo "[3/6] Checking DCV server status"
+    dcv list-servers || true
+
+    echo "[4/6] Fetching instance metadata"
     INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-    REGION=ap-south-1
+    REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
 
-    function mark_failed() {
-      aws ec2 create-tags \
-        --region $REGION \
-        --resources $INSTANCE_ID \
-        --tags Key=LabStatus,Value=FAILED
-      exit 1
-    }
+    echo "[5/6] Tagging instance as READY"
+    aws ec2 create-tags \
+      --region "$REGION" \
+      --resources "$INSTANCE_ID" \
+      --tags Key=LabBootstrap,Value=READY
 
-    function mark_success() {
-      aws ec2 create-tags \
-        --region $REGION \
-        --resources $INSTANCE_ID \
-        --tags Key=LabStatus,Value=BOOTSTRAP_OK
-    }
-
-    echo "==== USER DATA START ===="
-
-    systemctl restart sshd || mark_failed
-
-    echo "nameserver 10.10.17.253" > /etc/resolv.conf || mark_failed
-
-    until nslookup sumedhalabs.com; do sleep 5; done
-
-    systemctl stop sssd || true
-    rm -rf /var/lib/sss/db/* || mark_failed
-    systemctl start sssd || mark_failed
-
-    systemctl restart dcvserver || mark_failed
-
-    mark_success
-
-
-
+    echo "[6/6] Bootstrap completed successfully"
+    echo "========== LAB BOOTSTRAP END =========="
   EOF
   tags = {
     Name         = "${var.name}-${var.instance_name}-${var.suffix}"
@@ -114,3 +94,8 @@ output "pem_file_for_ssh" {
   value     = aws_key_pair.master_key_pair.key_name
   sensitive = true
 }
+
+output "instance_id" {
+  value = aws_instance.CentOS8-AMD.id
+}
+
