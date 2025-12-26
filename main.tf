@@ -32,52 +32,46 @@ resource "aws_instance" "CentOS8-AMD" {
 
 
   user_data = <<-EOF
-  #!/bin/bash
-set +e
+#!/bin/bash
+set -euo pipefail
 
 LOG=/var/log/lab-bootstrap.log
 exec > >(tee -a $LOG) 2>&1
 
 echo "========== LAB BOOTSTRAP START =========="
 
-# Wait for cloud-init networking
-sleep 30
+# Wait for cloud-init + network (CentOS 8 specific)
+cloud-init status --wait || echo "cloud-init timeout"
+sleep 10
+nmcli networking connectivity check || echo "Network connectivity check failed"
 
-# Ensure network is really up
-nm-online -t 60 || echo "NetworkManager timeout"
+# Ensure SSH is ready FIRST (before DCV)
+systemctl enable sshd --now
+systemctl is-active --quiet sshd && echo "SSHD ready" || { echo "SSHD failed"; exit 1; }
 
-# Install AWS CLI if missing
-if ! command -v aws >/dev/null 2>&1; then
-  echo "[BOOTSTRAP] Installing awscli"
-  dnf install -y awscli
-fi
+# Install AWS CLI if missing (required for tagging)
+dnf install -y awscli || echo "AWS CLI install skipped"
 
-# Ensure SSH
-systemctl enable sshd
-systemctl restart sshd
+# DCV - wait for X11/graphical.target first
+systemctl set-default graphical.target
+systemctl isolate graphical.target || systemctl restart gdm
+sleep 15
 
-# Ensure DCV
+# Start DCV only AFTER graphical is up
 systemctl enable dcvserver
 systemctl restart dcvserver
+systemctl is-active --quiet dcvserver && echo "DCV ready" || echo "DCV warning"
 
-# sleep 30
+# Tag instance as ready
+INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+REGION="ap-south-1"
+aws ec2 create-tags \
+  --region $REGION \
+  --resources "$INSTANCE_ID" \
+  --tags Key=LabBootstrap,Value=READY
 
-# INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-# REGION="ap-south-1"
-
-# echo "[BOOTSTRAP] Instance ID: $INSTANCE_ID"
-
-# aws ec2 create-tags \
-#   --region $REGION \
-#   --resources "$INSTANCE_ID" \
-#   --tags Key=LabBootstrap,Value=READY
-
-# RC=$?
-# echo "[BOOTSTRAP] Tagging exit code: $RC"
-
-echo "========== LAB BOOTSTRAP END =========="
-
-  EOF
+echo "========== LAB BOOTSTRAP COMPLETE =========="
+EOF
   tags = {
     Name         = "${var.name}-${var.instance_name}-${var.suffix}"
     map-migrated = "DADS45OSDL"
