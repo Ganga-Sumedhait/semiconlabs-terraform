@@ -60,20 +60,20 @@ systemctl restart sshd
 systemctl enable dcvserver
 systemctl restart dcvserver
 
-sleep 30
+# sleep 30
 
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-REGION="ap-south-1"
+# INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+# REGION="ap-south-1"
 
-echo "[BOOTSTRAP] Instance ID: $INSTANCE_ID"
+# echo "[BOOTSTRAP] Instance ID: $INSTANCE_ID"
 
-aws ec2 create-tags \
-  --region $REGION \
-  --resources "$INSTANCE_ID" \
-  --tags Key=LabBootstrap,Value=READY
+# aws ec2 create-tags \
+#   --region $REGION \
+#   --resources "$INSTANCE_ID" \
+#   --tags Key=LabBootstrap,Value=READY
 
-RC=$?
-echo "[BOOTSTRAP] Tagging exit code: $RC"
+# RC=$?
+# echo "[BOOTSTRAP] Tagging exit code: $RC"
 
 echo "========== LAB BOOTSTRAP END =========="
 
@@ -81,6 +81,7 @@ echo "========== LAB BOOTSTRAP END =========="
   tags = {
     Name         = "${var.name}-${var.instance_name}-${var.suffix}"
     map-migrated = "DADS45OSDL"
+    LabBootstrap = "READY"
   }
 }
 
