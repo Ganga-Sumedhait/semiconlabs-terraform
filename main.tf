@@ -71,7 +71,9 @@ aws ec2 create-tags \
   --tags Key=LabBootstrap,Value=READY
 
 echo "========== LAB BOOTSTRAP COMPLETE =========="
-EOF
+
+
+  EOF
   tags = {
     Name         = "${var.name}-${var.instance_name}-${var.suffix}"
     map-migrated = "DADS45OSDL"
