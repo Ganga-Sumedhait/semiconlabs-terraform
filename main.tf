@@ -13,11 +13,11 @@ resource "tls_private_key" "master_key_gen" {
   rsa_bits  = 2048
 }
 
-# Create the Key Pair
-resource "aws_key_pair" "master_key_pair" {
-  key_name   = "${var.name}-${var.instance_name}-${var.suffix}"
-  public_key = tls_private_key.master_key_gen.public_key_openssh
-}
+# # Create the Key Pair
+# resource "aws_key_pair" "master_key_pair" {
+#   key_name   = "${var.name}-${var.instance_name}-${var.suffix}"
+#   public_key = tls_private_key.master_key_gen.public_key_openssh
+# }
 
 # Windows Server instance with dynamic username and session setup
 resource "aws_instance" "CentOS8-AMD" {
