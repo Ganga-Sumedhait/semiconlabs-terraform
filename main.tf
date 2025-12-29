@@ -46,7 +46,16 @@ systemctl mask cloud-init || true
 rm -rf /var/lib/cloud/*
 
 # Fix fstab - remove remote mounts
-sed -i '/nfs\|efs\|cifs/d' /etc/fstab
+# sed -i '/nfs\|efs\|cifs/d' /etc/fstab
+# Mount EFS (non-blocking)
+mkdir -p /efs
+mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 \
+  fs-0985e64c096c42f09.efs.ap-south-1.amazonaws.com:/ /efs && \
+  echo "EFS mounted successfully" || \
+  echo "EFS mount failed (non-fatal)"
+
+# Verify mount
+df -h | grep efs || echo "EFS not mounted"
 
 # Wait for network
 for i in {1..30}; do
