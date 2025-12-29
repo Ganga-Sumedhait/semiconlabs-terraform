@@ -21,9 +21,10 @@ resource "aws_key_pair" "master_key_pair" {
 
 # Windows Server instance with dynamic username and session setup
 resource "aws_instance" "CentOS8-AMD" {
-  ami                    = var.ami_id        # Replace with your desired CentOS AMI ID
-  instance_type          = var.instance_type # Replace with your desired instance type
-  key_name               = aws_key_pair.master_key_pair.key_name
+  ami           = var.ami_id        # Replace with your desired CentOS AMI ID
+  instance_type = var.instance_type # Replace with your desired instance type
+  # key_name               = aws_key_pair.master_key_pair.key_name
+  key_name               = var.key_name # EXISTING keypair
   subnet_id              = "subnet-01e7e581424a68b10"
   availability_zone      = "ap-south-1a"
   vpc_security_group_ids = [data.aws_security_group.TerraformSecurityGroup.id]

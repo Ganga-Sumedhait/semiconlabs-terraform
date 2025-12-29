@@ -30,6 +30,11 @@ variable "instance_type" {
   # default = "t3a.medium"
 }
 
+variable "key_name" {
+  description = "Existing EC2 keypair name"
+  type        = string
+}
+
 variable "suffix" {
   description = "Suffix for the variables"
   type        = string
