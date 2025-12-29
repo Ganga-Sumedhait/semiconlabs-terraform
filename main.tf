@@ -115,7 +115,8 @@ output "CentOS8_AMD_Login" {
 
 # Output the PEM file for SSH
 output "pem_file_for_ssh" {
-  value     = aws_key_pair.master_key_pair.key_name
+  # value     = aws_key_pair.master_key_pair.key_name
+  value     = var.key_name
   sensitive = true
 }
 
