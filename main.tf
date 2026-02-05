@@ -33,6 +33,7 @@ resource "aws_instance" "CentOS8-AMD" {
 
 
   user_data = <<-EOF
+
 #!/bin/bash
 set -euo pipefail
 
@@ -41,47 +42,80 @@ exec > >(tee -a $LOG) 2>&1
 
 echo "========== LAB BOOTSTRAP START =========="
 
-# Kill cloud-init if it's hanging
-systemctl stop cloud-init || true
-systemctl mask cloud-init || true
-rm -rf /var/lib/cloud/*
+# CRITICAL: Remove EFS from fstab to prevent boot hangs
+sed -i '/efs/d' /etc/fstab
+sed -i '/fs-0985e64c096c42f09/d' /etc/fstab
 
-# Fix fstab - remove remote mounts
-# sed -i '/nfs\|efs\|cifs/d' /etc/fstab
-# Mount EFS (non-blocking)
+# Wait for cloud-init
+cloud-init status --wait || true
+
+# SSH
+systemctl enable sshd
+systemctl restart sshd
+
+# Mount EFS (non-blocking, will succeed now)
 mkdir -p /efs
-mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 \
-  fs-0985e64c096c42f09.efs.ap-south-1.amazonaws.com:/ /efs && \
-  echo "EFS mounted successfully" || \
+mount -t nfs4 -o nfsvers=4.1,_netdev \
+  fs-0985e64c096c42f09.efs.ap-south-1.amazonaws.com:/ /efs || \
   echo "EFS mount failed (non-fatal)"
 
-# Verify mount
-df -h | grep efs || echo "EFS not mounted"
-
-# Wait for network
-for i in {1..30}; do
-  ping -c1 169.254.169.254 >/dev/null 2>&1 && break
-  sleep 5
-done
-
-# SSH FIRST - critical for your app
-systemctl enable sshd --now
-ss -tlnp | grep :22 && echo "SSHD listening" || { echo "SSHD failed"; exit 1; }
-
-# Set multi-user (no graphical hangs)
-systemctl set-default multi-user.target
-systemctl isolate multi-user.target
-
-# DCV after SSH
-dnf install -y @dcvserver || echo "DCV package missing"
+# DCV
 systemctl enable dcvserver
-systemctl restart dcvserver || echo "DCV start warning"
+systemctl restart dcvserver || true
+
+# SSSD
+systemctl enable sssd
+systemctl restart sssd || true
 
 # Tag as ready
+INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
 aws ec2 create-tags \
   --region ap-south-1 \
-  --resources $(curl -s http://169.254.169.254/latest/meta-data/instance-id) \
+  --resources "$INSTANCE_ID" \
   --tags Key=LabBootstrap,Value=READY
+
+
+# # Kill cloud-init if it's hanging
+# systemctl stop cloud-init || true
+# systemctl mask cloud-init || true
+# rm -rf /var/lib/cloud/*
+
+# # Fix fstab - remove remote mounts
+# # sed -i '/nfs\|efs\|cifs/d' /etc/fstab
+# # Mount EFS (non-blocking)
+# mkdir -p /efs
+# mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 \
+#   fs-0985e64c096c42f09.efs.ap-south-1.amazonaws.com:/ /efs && \
+#   echo "EFS mounted successfully" || \
+#   echo "EFS mount failed (non-fatal)"
+
+# # Verify mount
+# df -h | grep efs || echo "EFS not mounted"
+
+# # Wait for network
+# for i in {1..30}; do
+#   ping -c1 169.254.169.254 >/dev/null 2>&1 && break
+#   sleep 5
+# done
+
+# # SSH FIRST - critical for your app
+# systemctl enable sshd --now
+# ss -tlnp | grep :22 && echo "SSHD listening" || { echo "SSHD failed"; exit 1; }
+
+# # Set multi-user (no graphical hangs)
+# systemctl set-default multi-user.target
+# systemctl isolate multi-user.target
+
+# # DCV after SSH
+# dnf install -y @dcvserver || echo "DCV package missing"
+# systemctl enable dcvserver
+# systemctl restart dcvserver || echo "DCV start warning"
+
+# # Tag as ready
+# aws ec2 create-tags \
+#   --region ap-south-1 \
+#   --resources $(curl -s http://169.254.169.254/latest/meta-data/instance-id) \
+#   --tags Key=LabBootstrap,Value=READY
 
 echo "========== BOOTSTRAP COMPLETE =========="
 
