@@ -1,8 +1,9 @@
-variable "keypair_name" {
-  description = "EC2's Key Pair"
-  type        = string
-  # default = "Koushal-Manual_Server"
-}
+# keypair_name variable removed - now using Terraform-generated keypair
+# variable "keypair_name" {
+#   description = "EC2's Key Pair"
+#   type        = string
+#   # default = "Koushal-Manual_Server"
+# }
 
 # Instance name for tagging the Windows server
 variable "instance_name" {
