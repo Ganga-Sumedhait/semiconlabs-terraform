@@ -30,10 +30,11 @@ variable "instance_type" {
   # default = "t3a.medium"
 }
 
-variable "key_name" {
-  description = "Existing EC2 keypair name"
-  type        = string
-}
+# key_name variable removed - now using Terraform-generated keypair
+# variable "key_name" {
+#   description = "Existing EC2 keypair name"
+#   type        = string
+# }
 
 variable "suffix" {
   description = "Suffix for the variables"

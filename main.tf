@@ -13,18 +13,23 @@ resource "tls_private_key" "master_key_gen" {
   rsa_bits  = 2048
 }
 
-# # Create the Key Pair
-# resource "aws_key_pair" "master_key_pair" {
-#   key_name   = "${var.name}-${var.instance_name}-${var.suffix}"
-#   public_key = tls_private_key.master_key_gen.public_key_openssh
-# }
+# Create AWS key pair from generated TLS key
+resource "aws_key_pair" "master_key_pair" {
+  key_name   = "${var.name}-${var.instance_name}-${var.suffix}"
+  public_key = tls_private_key.master_key_gen.public_key_openssh
+}
+
+# Output the private key content
+output "private_key_pem" {
+  value     = tls_private_key.master_key_gen.private_key_pem
+  sensitive = true
+}
 
 # Windows Server instance with dynamic username and session setup
 resource "aws_instance" "CentOS8-AMD" {
   ami           = var.ami_id        # Replace with your desired CentOS AMI ID
   instance_type = var.instance_type # Replace with your desired instance type
-  # key_name               = aws_key_pair.master_key_pair.key_name
-  key_name               = var.key_name # EXISTING keypair
+  key_name      = aws_key_pair.master_key_pair.key_name  # Use generated keypair
   subnet_id              = "subnet-01e7e581424a68b10"
   availability_zone      = "ap-south-1a"
   vpc_security_group_ids = [data.aws_security_group.TerraformSecurityGroup.id]
@@ -147,10 +152,9 @@ output "CentOS8_AMD_Login" {
   value = "Copy the mentioned URL & Paste it on Browser https://${aws_instance.CentOS8-AMD.public_ip}:8443"
 }
 
-# Output the PEM file for SSH
+# Output the PEM file for SSH (now using generated keypair name)
 output "pem_file_for_ssh" {
-  # value     = aws_key_pair.master_key_pair.key_name
-  value     = var.key_name
+  value     = aws_key_pair.master_key_pair.key_name
   sensitive = true
 }
 
