@@ -15,7 +15,7 @@ variable "instance_name" {
 variable "ami_id" {
   description = "ami image"
   type        = string
-  default     = "ami-0907f08f56b1878fc"
+  default     = "ami-09de70deff4a6e379"
 }
 
 variable "name" {
