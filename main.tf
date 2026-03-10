@@ -36,6 +36,10 @@ resource "aws_instance" "CentOS8-AMD" {
   # iam_instance_profile   = aws_iam_instance_profile.ssm_profile.name
   iam_instance_profile = "LabSSMRole"
 
+  root_block_device {
+    delete_on_termination = true
+  }
+
 
   user_data = <<-EOF
 
