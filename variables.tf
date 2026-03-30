@@ -15,7 +15,7 @@ variable "instance_name" {
 variable "ami_id" {
   description = "ami image"
   type        = string
-  default     = "ami-09de70deff4a6e379"
+  default     = "ami-03f0a6178c9b0e64d"
 }
 
 variable "name" {
@@ -28,7 +28,13 @@ variable "name" {
 variable "instance_type" {
   description = "Instance Type for EC2"
   type        = string
-  # default = "t3a.medium"
+  default     = "m6a.xlarge"
+}
+
+variable "root_volume_size" {
+  description = "Root EBS volume size in GiB"
+  type        = number
+  default     = 30
 }
 
 # key_name variable removed - now using Terraform-generated keypair

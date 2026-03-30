@@ -37,6 +37,7 @@ resource "aws_instance" "CentOS8-AMD" {
   iam_instance_profile = "LabSSMRole"
 
   root_block_device {
+    volume_size           = var.root_volume_size
     delete_on_termination = true
   }
 
