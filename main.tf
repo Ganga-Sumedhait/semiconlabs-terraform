@@ -73,6 +73,32 @@ mount -t nfs4 -o nfsvers=4.1,_netdev \
 systemctl enable dcvserver
 systemctl restart dcvserver || true
 
+# Configure NICE DCV to disable the automatic console session and use
+# virtual sessions managed by the backend.
+cat >/etc/dcv/dcv.conf <<'DCVCONF'
+[security]
+authentication="system"
+pam-service-name="dcv"
+
+[session-management]
+create-session = false
+
+[session-management/automatic-console-session]
+owner = "%user%"
+enable = false
+
+[clipboard]
+enable=false
+
+[log]
+log-level=debug
+
+[connectivity]
+idle-timeout=0
+DCVCONF
+
+systemctl restart dcvserver || true
+
 # SSSD
 systemctl enable sssd
 systemctl restart sssd || true
