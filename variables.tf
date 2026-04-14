@@ -13,7 +13,7 @@ variable "instance_name" {
 }
 
 variable "ami_id" {
-  description = "ami image"
+  description = "Lab AMI (bake semiconlabs-dcv-watch via golden-ami-dcv-watcher.sh before registering this id)"
   type        = string
   default     = "ami-0a613a68d04dcdca1"
 }

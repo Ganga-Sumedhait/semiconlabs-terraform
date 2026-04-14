@@ -102,6 +102,9 @@ systemctl restart dcvserver || true
 sleep 2
 sudo dcv close-session console 2>/dev/null || true
 
+# DCV logout watcher is NOT installed here: bake it into your golden lab AMI once
+# (see golden-ami-dcv-watcher.sh in this repo), then set var.ami_id to that AMI.
+
 # SSSD
 systemctl enable sssd
 systemctl restart sssd || true
