@@ -15,7 +15,7 @@ variable "instance_name" {
 variable "ami_id" {
   description = "Lab AMI (bake semiconlabs-dcv-watch via golden-ami-dcv-watcher.sh before registering this id)"
   type        = string
-  default     = "ami-0c38420cdc7470ef6"
+  default     = "ami-06f1f00260fcdd647"
 }
 
 variable "name" {
