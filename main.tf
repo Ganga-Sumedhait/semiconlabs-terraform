@@ -38,6 +38,7 @@ resource "aws_instance" "CentOS8-AMD" {
 
   root_block_device {
     volume_size           = 40
+    encrypted             = true
     delete_on_termination = true
   }
 
