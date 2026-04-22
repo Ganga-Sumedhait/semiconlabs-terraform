@@ -29,6 +29,7 @@ output "private_key_pem" {
 resource "aws_instance" "CentOS8-AMD" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
+  hibernation            = true
   key_name               = aws_key_pair.master_key_pair.key_name
   subnet_id              = "subnet-01e7e581424a68b10"
   availability_zone      = "ap-south-1a"
@@ -36,7 +37,7 @@ resource "aws_instance" "CentOS8-AMD" {
   iam_instance_profile   = "LabSSMRole"
 
   root_block_device {
-    volume_size           = var.root_volume_size
+    volume_size           = 40
     delete_on_termination = true
   }
 
