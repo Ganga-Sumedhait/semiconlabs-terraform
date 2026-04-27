@@ -43,6 +43,12 @@ variable "subnet_id" {
   default     = "subnet-0c4d6990bb08a09b2"
 }
 
+variable "associate_public_ip_address" {
+  description = "Whether to attach a public IPv4 address to the lab instance"
+  type        = bool
+  default     = false
+}
+
 # key_name variable removed - now using Terraform-generated keypair
 # variable "key_name" {
 #   description = "Existing EC2 keypair name"

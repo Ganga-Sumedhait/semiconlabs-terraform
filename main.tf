@@ -31,7 +31,7 @@ resource "aws_instance" "CentOS8-AMD" {
   instance_type          = var.instance_type
   key_name               = aws_key_pair.master_key_pair.key_name
   subnet_id              = var.subnet_id
-  associate_public_ip_address = false
+  associate_public_ip_address = var.associate_public_ip_address
   vpc_security_group_ids = [data.aws_security_group.TerraformSecurityGroup.id]
   iam_instance_profile   = "LabSSMRole"
 
