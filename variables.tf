@@ -37,6 +37,12 @@ variable "root_volume_size" {
   default     = 30
 }
 
+variable "subnet_id" {
+  description = "Subnet ID where lab EC2 is launched (staging private subnet default)"
+  type        = string
+  default     = "subnet-0c4d6990bb08a09b2"
+}
+
 # key_name variable removed - now using Terraform-generated keypair
 # variable "key_name" {
 #   description = "Existing EC2 keypair name"

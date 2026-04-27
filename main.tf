@@ -30,8 +30,8 @@ resource "aws_instance" "CentOS8-AMD" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
   key_name               = aws_key_pair.master_key_pair.key_name
-  subnet_id              = "subnet-01e7e581424a68b10"
-  availability_zone      = "ap-south-1a"
+  subnet_id              = var.subnet_id
+  associate_public_ip_address = false
   vpc_security_group_ids = [data.aws_security_group.TerraformSecurityGroup.id]
   iam_instance_profile   = "LabSSMRole"
 
@@ -137,6 +137,11 @@ resource "local_file" "local_key_pair" {
 # Output the CentOS8-AMD Server Public IP
 output "CentOS8_AMD_Server_Public_IP" {
   value = aws_instance.CentOS8-AMD.public_ip
+}
+
+# Private IP (required when instance is in a private subnet; backend / reverse proxy use this for SSH/DCV upstream)
+output "CentOS8_AMD_Server_Private_IP" {
+  value = aws_instance.CentOS8-AMD.private_ip
 }
 
 # Output Copy the URL
