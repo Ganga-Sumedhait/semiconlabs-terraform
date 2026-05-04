@@ -13,9 +13,9 @@ variable "instance_name" {
 }
 
 variable "ami_id" {
-  description = "Lab AMI (bake semiconlabs-dcv-watch via golden-ami-dcv-watcher.sh before registering this id)"
+  description = "Lab AMI — ap-south-1 golden image (semiconlabs-dcv-watch baked via golden-ami-dcv-watcher.sh)"
   type        = string
-  default     = "ami-0bbae7a1b2d7e89be"
+  default     = "ami-05b21fd04a458bc62"
 }
 
 variable "name" {
@@ -35,6 +35,12 @@ variable "root_volume_size" {
   description = "Root EBS volume size in GiB"
   type        = number
   default     = 30
+}
+
+variable "delete_root_volume_on_termination" {
+  description = "When false (dedicated labs), root EBS persists after EC2 terminates for retention/backup SKU"
+  type        = bool
+  default     = true
 }
 
 variable "subnet_id" {
