@@ -82,10 +82,12 @@ resource "aws_ssm_association" "managed_ad_domain_join" {
     values = [aws_instance.CentOS8-AMD.id]
   }
 
+  # Each value must match a single IPv4. Comma-join was rejected ("a,b" fails the IPv4 regex).
+  # AWS CreateAssociation expects dnsIpAddresses as multiple ParameterValues — use a Terraform list.
   parameters = {
     directoryId    = var.ad_directory_id
     directoryName  = var.ad_domain
-    dnsIpAddresses = join(",", var.ad_dns_ips)
+    dnsIpAddresses = var.ad_dns_ips
   }
 }
 
