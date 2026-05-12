@@ -54,7 +54,9 @@ sed -i '/efs/d' /etc/fstab || true
 sed -i '/fs-0985e64c096c42f09/d' /etc/fstab || true
 
 # Wait for cloud-init
+lab_log "cloud-init: waiting for modules to finish..."
 cloud-init status --wait || true
+lab_log "cloud-init: wait returned"
 
 # SSH
 systemctl enable sshd
@@ -66,7 +68,7 @@ LAB_B64='${lab_ssh_public_key_b64}'
 if command -v base64 >/dev/null 2>&1 && [ -n "$LAB_B64" ]; then
   printf '%s' "$LAB_B64" | base64 -d >/tmp/lab-launch.pub 2>/dev/null || true
   if [ -s /tmp/lab-launch.pub ]; then
-    for U in cloud-user ec2-user; do
+    for U in centos cloud-user ec2-user ssm-user; do
       if id "$U" &>/dev/null; then
         H=$(eval echo "~$U")
         install -d -m 700 -o "$U" -g "$U" "$H/.ssh" 2>/dev/null || mkdir -p "$H/.ssh"
@@ -90,11 +92,20 @@ else
   lab_log "WARN base64 missing or empty lab_ssh_public_key_b64 — SSH PEM may not work until keys added"
 fi
 
-# Mount EFS (non-blocking)
+# EFS: must NOT block AD join. A stuck NFS mount prevented the rest of userdata (no "AD phase" in log).
+lab_log "EFS: attempting mount (max 90s; failure is non-fatal for domain join)"
 mkdir -p /efs
-mount -t nfs4 -o nfsvers=4.1,_netdev \
-  fs-0985e64c096c42f09.efs.ap-south-1.amazonaws.com:/ /efs || \
-  echo "EFS mount failed (non-fatal)"
+EFS_SRC="fs-0985e64c096c42f09.efs.ap-south-1.amazonaws.com:/"
+if command -v timeout >/dev/null 2>&1; then
+  if timeout 90 mount -t nfs4 -o nfsvers=4.1,_netdev,timeo=30,retrans=3,noresvport \
+    "$${EFS_SRC}" /efs 2>&1; then
+    lab_log "EFS: mounted on /efs"
+  else
+    lab_log "WARN EFS: mount failed or timed out — continuing without /efs"
+  fi
+else
+  lab_log "WARN EFS: coreutils 'timeout' missing; skipping EFS mount to avoid blocking bootstrap"
+fi
 
 %{ if enable_ad_join ~}
 lab_log "AD phase: mechanism=${ad_join_mechanism} domain=${ad_domain}"
@@ -126,11 +137,11 @@ fi
 lab_log "install/check AD client packages (dnf|yum)"
 # Golden AMI should include these; reinstall is safe for missing deps (ldap/clients, tools).
 if command -v dnf >/dev/null 2>&1; then
-  dnf install -y realmd adcli oddjob oddjob-mkhomedir sssd sssd-tools \
-    krb5-workstation samba-common-tools openldap-clients awscli || true
+  dnf -q -y install realmd adcli oddjob oddjob-mkhomedir sssd sssd-tools \
+    krb5-workstation samba-common-tools openldap-clients awscli 2>&1 || true
 elif command -v yum >/dev/null 2>&1; then
-  yum install -y realmd adcli oddjob oddjob-mkhomedir sssd sssd-tools \
-    krb5-workstation samba-common-tools openldap-clients awscli || true
+  yum -q -y install realmd adcli oddjob oddjob-mkhomedir sssd sssd-tools \
+    krb5-workstation samba-common-tools openldap-clients awscli 2>&1 || true
 fi
 lab_log "AD client packages step finished"
 
