@@ -63,49 +63,94 @@ systemctl enable sshd
 systemctl restart sshd
 
 # Install lab TLS public key without EC2 ImportKeyPair (IAM: ec2:ImportKeyPair often denied).
+# Persist the public key to /etc/lab/lab-ssh-key.pub and install a one-shot service that
+# re-applies it to all interactive users on EVERY boot. This keeps SSH working after:
+#   - cloud-init "first boot only" runs (snapshot/volume-clone keeps marker)
+#   - reboots (new SSSD-resolved AD homes appear on demand)
+#   - golden AMI updates that change the default cloud user
 lab_log "install lab SSH pubkey from Terraform (base64 payload; no aws_key_pair)"
 LAB_B64='${lab_ssh_public_key_b64}'
+lab_log "lab_ssh_public_key_b64 length=$${#LAB_B64}"
+mkdir -p /etc/lab
 if command -v base64 >/dev/null 2>&1 && [ -n "$LAB_B64" ]; then
-  printf '%s' "$LAB_B64" | base64 -d >/tmp/lab-launch.pub 2>/dev/null || true
-  if [ -s /tmp/lab-launch.pub ]; then
-    lab_ssh_append_pub_for_user() {
-      local U="$1"
-      id "$U" &>/dev/null || return 0
-      local H
-      H=$(getent passwd "$U" 2>/dev/null | cut -d: -f6)
-      [ -n "$H" ] && [ -d "$H" ] || return 0
-      install -d -m 700 -o "$U" -g "$U" "$H/.ssh" 2>/dev/null || mkdir -p "$H/.ssh"
-      chmod 700 "$H/.ssh" 2>/dev/null || true
-      chown "$U:$U" "$H/.ssh" 2>/dev/null || true
-      touch "$H/.ssh/authorized_keys"
-      chmod 600 "$H/.ssh/authorized_keys"
-      chown "$U:$U" "$H/.ssh/authorized_keys"
-      while IFS= read -r line || [ -n "$line" ]; do
-        [ -z "$(echo "$line" | tr -d '[:space:]')" ] && continue
-        grep -qxF "$line" "$H/.ssh/authorized_keys" 2>/dev/null || echo "$line" >>"$H/.ssh/authorized_keys"
-      done </tmp/lab-launch.pub
-      lab_log "lab SSH pubkey appended for $U (home=$H)"
-    }
-    # Known cloud / DCV AMIs first (fast path).
-    for U in centos cloud-user ec2-user ssm-user ubuntu admin rocky almalinux fedora; do
-      lab_ssh_append_pub_for_user "$U" || true
-    done
-    # Any interactive account with a real home under /home/ (covers custom golden AMIs).
-    if command -v getent >/dev/null 2>&1; then
-      while IFS=: read -r u _ uid _ _ home shell; do
-        [ "$${uid:-0}" -ge 1000 ] 2>/dev/null || continue
-        case "$home" in /home/*) ;; *) continue;; esac
-        case "$shell" in *nologin*|*false*|/usr/sbin/nologin|/sbin/nologin|/bin/false) continue;; esac
-        lab_ssh_append_pub_for_user "$u" || true
-      done < <(getent passwd 2>/dev/null || true)
-    fi
-    rm -f /tmp/lab-launch.pub
+  printf '%s' "$LAB_B64" | base64 -d >/etc/lab/lab-ssh-key.pub 2>/dev/null || true
+  if [ -s /etc/lab/lab-ssh-key.pub ]; then
+    chmod 644 /etc/lab/lab-ssh-key.pub
+    lab_log "lab pub key written to /etc/lab/lab-ssh-key.pub ($(wc -c </etc/lab/lab-ssh-key.pub) bytes)"
   else
-    lab_log "WARN could not decode lab_ssh_public_key_b64"
+    lab_log "WARN could not decode lab_ssh_public_key_b64 — /etc/lab/lab-ssh-key.pub is empty"
   fi
 else
   lab_log "WARN base64 missing or empty lab_ssh_public_key_b64 — SSH PEM may not work until keys added"
 fi
+
+# Boot-time injector script (idempotent). Runs from the systemd one-shot service below
+# AND once during this bootstrap pass.
+cat >/usr/local/sbin/lab-ssh-key-bootstrap.sh <<'LABKEYSH'
+#!/bin/bash
+set -u
+PUBFILE=/etc/lab/lab-ssh-key.pub
+[ -s "$PUBFILE" ] || { echo "[lab-ssh-key] no pubkey at $PUBFILE; skipping" ; exit 0 ; }
+
+inject_for_user() {
+  local U="$1"
+  id "$U" >/dev/null 2>&1 || return 0
+  local H
+  H=$(getent passwd "$U" 2>/dev/null | cut -d: -f6)
+  [ -n "$H" ] && [ -d "$H" ] || return 0
+  install -d -m 700 -o "$U" -g "$U" "$H/.ssh" 2>/dev/null || mkdir -p "$H/.ssh"
+  chmod 700 "$H/.ssh" 2>/dev/null || true
+  chown "$U":"$U" "$H/.ssh" 2>/dev/null || true
+  touch "$H/.ssh/authorized_keys"
+  chmod 600 "$H/.ssh/authorized_keys"
+  chown "$U":"$U" "$H/.ssh/authorized_keys"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -z "$(echo "$line" | tr -d '[:space:]')" ] && continue
+    grep -qxF "$line" "$H/.ssh/authorized_keys" 2>/dev/null || {
+      echo "$line" >> "$H/.ssh/authorized_keys"
+      echo "[lab-ssh-key] added key for $U ($H)"
+    }
+  done < "$PUBFILE"
+}
+
+# Known cloud / DCV AMIs first (fast path).
+for U in centos cloud-user ec2-user ssm-user ubuntu admin rocky almalinux fedora root; do
+  inject_for_user "$U" || true
+done
+# Any interactive account with a home under /home/ (covers custom golden AMIs + AD users).
+if command -v getent >/dev/null 2>&1; then
+  while IFS=: read -r u _ uid _ _ home shell; do
+    [ "$${uid:-0}" -ge 1000 ] 2>/dev/null || continue
+    case "$home" in /home/*) ;; *) continue;; esac
+    case "$shell" in *nologin*|*false*|/usr/sbin/nologin|/sbin/nologin|/bin/false) continue;; esac
+    inject_for_user "$u" || true
+  done < <(getent passwd 2>/dev/null || true)
+fi
+echo "[lab-ssh-key] done"
+LABKEYSH
+chmod +x /usr/local/sbin/lab-ssh-key-bootstrap.sh
+
+cat >/etc/systemd/system/lab-ssh-key-bootstrap.service <<'LABKEYSVC'
+[Unit]
+Description=Lab SSH key bootstrap (re-inject TLS public key into authorized_keys for all interactive users)
+After=network-online.target sshd.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lab-ssh-key-bootstrap.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+LABKEYSVC
+
+systemctl daemon-reload || true
+systemctl enable lab-ssh-key-bootstrap.service 2>/dev/null || true
+# Run immediately during this bootstrap pass too.
+/usr/local/sbin/lab-ssh-key-bootstrap.sh || lab_log "WARN lab-ssh-key-bootstrap.sh returned non-zero"
 
 # EFS: must NOT block AD join. A stuck NFS mount prevented the rest of userdata (no "AD phase" in log).
 lab_log "EFS: attempting mount (max 90s; failure is non-fatal for domain join)"
