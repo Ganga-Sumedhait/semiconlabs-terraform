@@ -1,6 +1,9 @@
 # Copy to terraform.tfvars (gitignored) and adjust. Current golden lab AMI (ap-south-1, GNOME+DCV+PAM; AD join via user-data + SSM):
 ami_id = "ami-066401294ec783ea4"
 
+# Optional: domain join password for realm_userdata / adcli fallback (no SSM read). Prefer SSM in production.
+# ad_join_password = "your-domain-join-service-account-password"
+
 # Optional overrides — defaults also live in variables.tf
 # instance_type = "m6a.xlarge"
 # subnet_id     = "subnet-0c4d6990bb08a09b2"

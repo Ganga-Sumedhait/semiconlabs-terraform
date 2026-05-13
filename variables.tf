@@ -118,7 +118,8 @@ variable "enable_ad_join" {
       (var.ad_join_mechanism == "realm_userdata" &&
         var.ad_domain != "" &&
         var.ad_join_user != "" &&
-        (var.ad_join_password_secretsmanager_secret_id != "" ||
+        (trimspace(var.ad_join_password) != "" ||
+          var.ad_join_password_secretsmanager_secret_id != "" ||
           var.ad_join_password_ssm_parameter_name != "")) ||
       (var.ad_join_mechanism == "ssm_aws_managed" &&
         var.ad_directory_id != "" &&
@@ -127,11 +128,12 @@ variable "enable_ad_join" {
         (
           !var.ad_fallback_adcli_after_ssm ||
           (var.ad_join_user != "" &&
-            (var.ad_join_password_secretsmanager_secret_id != "" ||
+            (trimspace(var.ad_join_password) != "" ||
+              var.ad_join_password_secretsmanager_secret_id != "" ||
               var.ad_join_password_ssm_parameter_name != ""))
         ))
     )
-    error_message = "When enable_ad_join=true: realm_userdata needs ad_join_user + password (Secrets Manager id or SSM parameter). ssm_aws_managed needs ad_directory_id + ad_domain + ad_dns_ips; if ad_fallback_adcli_after_ssm=true also set ad_join_user + password source."
+    error_message = "When enable_ad_join=true: realm_userdata needs ad_join_user + password (ad_join_password in tfvars, or Secrets Manager id, or SSM parameter name). ssm_aws_managed needs ad_directory_id + ad_domain + ad_dns_ips; if ad_fallback_adcli_after_ssm=true also set ad_join_user + a password source."
   }
 }
 
@@ -151,8 +153,19 @@ variable "ad_join_user" {
   default     = "admin@sumedhalabs.com"
 }
 
+variable "ad_join_password" {
+  description = <<-EOT
+    Plaintext domain-join password (realm_userdata and ad_fallback_adcli). When non-empty, user-data uses this
+    instead of reading SSM/Secrets (no instance IAM needed for GetParameter). SECURITY: stored in Terraform state
+    and embedded (base64) in EC2 user_data — use SSM Parameter Store or Secrets Manager for production; rotate if committed.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = "SemiconLabs@2026"
+}
+
 variable "ad_join_password_ssm_parameter_name" {
-  description = "Only for realm_userdata: SSM SecureString name holding the join account password. Ignored if ad_join_password_secretsmanager_secret_id is set (Secrets Manager is used first) or for ssm_aws_managed."
+  description = "realm_userdata: SSM SecureString name for the join account password. Instance profile (e.g. LabSSMRole) needs ssm:GetParameter on this name and kms:Decrypt if the key is not aws/ssm."
   type        = string
   default     = "/semiconlabs/lab/ad-join-password"
 }

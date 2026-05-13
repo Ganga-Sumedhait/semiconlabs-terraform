@@ -12,6 +12,30 @@ lab_log() {
   echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [lab-bootstrap] $*"
 }
 
+# Install AWS CLI v2 to /usr/local/bin. RPM awscli v1 often fails or mis-resolves region for
+# ssm:GetParameter / secretsmanager from user-data (empty password -> realm join skipped).
+lab_ensure_awscli_v2() {
+  if [ -x /usr/local/bin/aws ]; then
+    lab_log "awscli v2 already present: $(/usr/local/bin/aws --version 2>&1 | head -1)"
+    return 0
+  fi
+  lab_log "installing AWS CLI v2 (SSM/Secrets API calls from user-data)"
+  dnf -q -y install unzip curl ca-certificates 2>/dev/null || yum -q -y install unzip curl ca-certificates 2>/dev/null || true
+  rm -rf /tmp/awscliv2.zip /tmp/aws 2>/dev/null || true
+  if curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip \
+    && (cd /tmp && unzip -qo awscliv2.zip) \
+    && /tmp/aws/install --update >/dev/null 2>&1; then
+    rm -rf /tmp/aws /tmp/awscliv2.zip 2>/dev/null || true
+  fi
+  if [ -x /usr/local/bin/aws ]; then
+    lab_log "awscli v2 installed: $(/usr/local/bin/aws --version 2>&1 | head -1)"
+    export PATH="/usr/local/bin:/usr/local/sbin:$${PATH}"
+    return 0
+  fi
+  lab_log "WARN awscli v2 install failed; will use PATH aws ($(command -v aws 2>/dev/null || echo none))"
+  return 1
+}
+
 lab_log "log file=$LOG (see also journalctl -u cloud-final)"
 echo "========== LAB BOOTSTRAP START =========="
 
@@ -39,6 +63,7 @@ cat >/etc/systemd/system/amazon-ssm-agent.service.d/99-lab-aws-region.conf <<SSM
 [Service]
 Environment=AWS_DEFAULT_REGION=$REGION
 Environment=AWS_REGION=$REGION
+Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/sbin:/bin
 SSMENV
 systemctl daemon-reload 2>/dev/null || true
 # The agent process must restart to pick up Environment= from the drop-in. If we only
@@ -221,6 +246,15 @@ else
   lab_log "WARN EFS: coreutils 'timeout' missing; skipping EFS mount to avoid blocking bootstrap"
 fi
 
+# AWS CLI v2 + AWSBIN for EC2 tags and (when enabled) SSM/Secrets reads — must run even if enable_ad_join=false.
+lab_ensure_awscli_v2 || true
+if [ -x /usr/local/bin/aws ]; then
+  export PATH="/usr/local/bin:/usr/local/sbin:$${PATH}"
+fi
+AWSBIN="/usr/local/bin/aws"
+if [ ! -x "$${AWSBIN}" ]; then AWSBIN=$(command -v aws || echo aws); fi
+lab_log "bootstrap AWSBIN=$${AWSBIN} ($$($${AWSBIN} --version 2>&1 | head -1))"
+
 %{ if enable_ad_join ~}
 lab_log "AD phase: mechanism=${ad_join_mechanism} domain=${ad_domain}"
 
@@ -258,32 +292,6 @@ elif command -v yum >/dev/null 2>&1; then
     krb5-workstation samba-common-tools openldap-clients awscli 2>&1 || true
 fi
 lab_log "AD client packages step finished"
-
-# awscli v2 self-heal. The golden CentOS 8 AMI ships awscli v1 baked in, but
-# on instances 132-136 the awscli-1.18.156 RPM is half-broken — `aws
-# --version` throws "ModuleNotFoundError: No module named 'awscli.formatter'"
-# and `dnf install awscli` cannot repair it ("Error unpacking rpm package").
-# Effect: every `aws` call inside this script silently dies (the final
-# `aws ec2 create-tags ... LabBootstrap=READY`, the realm_userdata branch
-# reading join creds, …). We install the static awscli v2 single-binary; ~30s
-# and no Python dependencies. Idempotent: skip if `aws --version` works.
-if ! aws --version >/dev/null 2>&1; then
-  lab_log "awscli v1 baked in AMI is broken; installing awscli v2..."
-  if ! command -v unzip >/dev/null 2>&1; then
-    dnf -q -y install unzip 2>/dev/null || yum -q -y install unzip 2>/dev/null || true
-  fi
-  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip 2>/dev/null \
-    && ( cd /tmp && unzip -qo awscliv2.zip ) \
-    && /tmp/aws/install --update >/dev/null 2>&1 \
-    && rm -rf /tmp/aws /tmp/awscliv2.zip
-  if command -v aws >/dev/null 2>&1 && aws --version >/dev/null 2>&1; then
-    lab_log "awscli v2 installed: $(aws --version 2>&1 | head -1)"
-  else
-    lab_log "WARN awscli v2 install failed — aws commands later in this script will be no-ops"
-  fi
-else
-  lab_log "awscli already working: $(aws --version 2>&1 | head -1)"
-fi
 
 %{ if ad_join_mechanism == "ssm_aws_managed" ~}
 # JoinDirectoryServiceDomain only runs via SSM once the managed instance reports Online — ensure agent is up early.
@@ -369,31 +377,50 @@ LAB_SUDO_EOF
 fi
 
 %{ if ad_join_mechanism == "realm_userdata" ~}
+lab_log "realm_userdata: preparing join password"
 JOIN_PW=""
+CRED_ERR=/tmp/lab-ad-cred-fetch.err
+rm -f "$${CRED_ERR}" 2>/dev/null || true
+%{ if ad_join_password_b64 != "" ~}
+JOIN_PW=$(printf '%s' '${ad_join_password_b64}' | base64 -d) || true
+if [ -n "$${JOIN_PW}" ]; then
+  lab_log "realm_userdata: using ad_join_password from Terraform (not SSM/Secrets)"
+else
+  lab_log "WARN realm_userdata: ad_join_password decode failed or empty"
+fi
+%{ else ~}
+lab_log "realm_userdata: reading join password from AWS (Secrets Manager or SSM)"
 %{ if ad_join_password_secretsmanager_secret_id != "" ~}
-JOIN_PW=$(aws secretsmanager get-secret-value \
+JOIN_PW=$$($${AWSBIN} secretsmanager get-secret-value \
   --region "$${REGION}" \
   --secret-id '${ad_join_password_secretsmanager_secret_id}' \
   --query SecretString \
-  --output text 2>/dev/null || true)
+  --output text 2>"$${CRED_ERR}" || true)
 if command -v jq >/dev/null 2>&1 && [ -n "$${JOIN_PW}" ] && printf '%s' "$${JOIN_PW}" | jq -e . >/dev/null 2>&1; then
   PW_RAW_SM="$${JOIN_PW}"
   JOIN_PW=$(printf '%s' "$${PW_RAW_SM}" | jq -r '.password // empty' || true)
   [ -z "$${JOIN_PW}" ] && JOIN_PW="$${PW_RAW_SM}"
 fi
 %{ else ~}
-JOIN_PW=$(aws ssm get-parameter \
+JOIN_PW=$$($${AWSBIN} ssm get-parameter \
   --region "$${REGION}" \
   --name "${ad_join_password_ssm_parameter_name}" \
   --with-decryption \
   --query Parameter.Value \
-  --output text 2>/dev/null || true)
+  --output text 2>"$${CRED_ERR}" || true)
+%{ endif ~}
 %{ endif ~}
 if [ -z "$${JOIN_PW}" ] || [ "$${JOIN_PW}" = "None" ]; then
+  if [ -s "$${CRED_ERR}" ]; then
+    lab_log "realm_userdata: AWS CLI stderr (IAM / KMS / region / parameter name) follows:"
+    sed 's/^/[realm_userdata] /' "$${CRED_ERR}" | tail -40 || true
+  else
+    lab_log "realm_userdata: no password (set ad_join_password in tfvars, or fix SSM/Secrets + IAM)"
+  fi
 %{ if ad_join_password_secretsmanager_secret_id != "" ~}
   echo "ERROR: Could not read AD join password from Secrets Manager '${ad_join_password_secretsmanager_secret_id}'. Check IAM (secretsmanager:GetSecretValue) + secret format (plain text or JSON {\"password\":\"...\"})." >&2
 %{ else ~}
-  echo "ERROR: Could not read AD join password from SSM parameter '${ad_join_password_ssm_parameter_name}'. Check IAM (ssm:GetParameter) + parameter path." >&2
+  echo "ERROR: Could not read AD join password from SSM parameter '${ad_join_password_ssm_parameter_name}'. Set ad_join_password in terraform.tfvars, or attach ssm:GetParameter + kms:Decrypt to the instance role. Parameter must exist in $${REGION}." >&2
 %{ endif ~}
 else
 %{ if length(ad_dns_ips) > 0 ~}
@@ -477,8 +504,11 @@ if [ "$${JOINED}" != "1" ]; then
   lab_log "WARN join not confirmed in window; verify SSM association AWS-JoinDirectoryServiceDomain (+ IAM LabSSMRole AmazonSSMDirectoryServiceAccess)"
 %{ if ad_fallback_adcli_after_ssm ~}
   JOIN_PW_FB=""
+%{ if ad_join_password_b64 != "" ~}
+  JOIN_PW_FB=$(printf '%s' '${ad_join_password_b64}' | base64 -d) || true
+%{ else ~}
 %{ if ad_join_password_secretsmanager_secret_id != "" ~}
-  JOIN_PW_FB=$(aws secretsmanager get-secret-value \
+  JOIN_PW_FB=$$($${AWSBIN} secretsmanager get-secret-value \
     --region "$${REGION}" \
     --secret-id '${ad_join_password_secretsmanager_secret_id}' \
     --query SecretString \
@@ -489,12 +519,13 @@ if [ "$${JOINED}" != "1" ]; then
     [ -z "$${JOIN_PW_FB}" ] && JOIN_PW_FB="$${PW_RAW_SM_FB}"
   fi
 %{ else ~}
-  JOIN_PW_FB=$(aws ssm get-parameter \
+  JOIN_PW_FB=$$($${AWSBIN} ssm get-parameter \
     --region "$${REGION}" \
     --name "${ad_join_password_ssm_parameter_name}" \
     --with-decryption \
     --query Parameter.Value \
     --output text 2>/dev/null || true)
+%{ endif ~}
 %{ endif ~}
   AD_JOIN_ESC=${jsonencode(ad_join_user)}
   if [ -n "$${JOIN_PW_FB}" ] && [ "$${JOIN_PW_FB}" != "None" ] && [ -n "$${AD_JOIN_ESC}" ] && [ "$${AD_JOIN_ESC}" != '""' ]; then
@@ -624,7 +655,7 @@ systemctl enable sssd || true
 systemctl restart sssd || true
 lab_log "final sssd restart before READY tag"
 
-aws ec2 create-tags \
+$${AWSBIN} ec2 create-tags \
   --region ${aws_region} \
   --resources "$${INSTANCE_ID}" \
   --tags Key=LabBootstrap,Value=READY

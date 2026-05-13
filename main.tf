@@ -57,6 +57,7 @@ resource "aws_instance" "CentOS8-AMD" {
     ad_domain                             = var.ad_domain
     lower_ad_domain                       = local.lower_ad_domain
     ad_join_user                            = var.ad_join_user
+    ad_join_password_b64                    = trimspace(var.ad_join_password) != "" ? base64encode(var.ad_join_password) : ""
     ad_join_password_ssm_parameter_name   = var.ad_join_password_ssm_parameter_name
     ad_join_password_secretsmanager_secret_id = var.ad_join_password_secretsmanager_secret_id
     ad_computer_ou                          = var.ad_computer_ou
