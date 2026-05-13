@@ -210,6 +210,32 @@ elif command -v yum >/dev/null 2>&1; then
 fi
 lab_log "AD client packages step finished"
 
+# awscli v2 self-heal. The golden CentOS 8 AMI ships awscli v1 baked in, but
+# on instances 132-136 the awscli-1.18.156 RPM is half-broken — `aws
+# --version` throws "ModuleNotFoundError: No module named 'awscli.formatter'"
+# and `dnf install awscli` cannot repair it ("Error unpacking rpm package").
+# Effect: every `aws` call inside this script silently dies (the final
+# `aws ec2 create-tags ... LabBootstrap=READY`, the realm_userdata branch
+# reading join creds, …). We install the static awscli v2 single-binary; ~30s
+# and no Python dependencies. Idempotent: skip if `aws --version` works.
+if ! aws --version >/dev/null 2>&1; then
+  lab_log "awscli v1 baked in AMI is broken; installing awscli v2..."
+  if ! command -v unzip >/dev/null 2>&1; then
+    dnf -q -y install unzip 2>/dev/null || yum -q -y install unzip 2>/dev/null || true
+  fi
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip 2>/dev/null \
+    && ( cd /tmp && unzip -qo awscliv2.zip ) \
+    && /tmp/aws/install --update >/dev/null 2>&1 \
+    && rm -rf /tmp/aws /tmp/awscliv2.zip
+  if command -v aws >/dev/null 2>&1 && aws --version >/dev/null 2>&1; then
+    lab_log "awscli v2 installed: $(aws --version 2>&1 | head -1)"
+  else
+    lab_log "WARN awscli v2 install failed — aws commands later in this script will be no-ops"
+  fi
+else
+  lab_log "awscli already working: $(aws --version 2>&1 | head -1)"
+fi
+
 %{ if ad_join_mechanism == "ssm_aws_managed" ~}
 # JoinDirectoryServiceDomain only runs via SSM once the managed instance reports Online — ensure agent is up early.
 lab_log "ssm_aws_managed: enable/restart amazon-ssm-agent (required before directory join document)"
@@ -228,14 +254,24 @@ SSM_ONLINE_DEADLINE=$(( $(date +%s) + 300 ))
 SSM_SEEN_GOOD=""
 # Readiness signals that work for EC2 instance-role identity (no
 # /var/lib/amazon/ssm/Vault/Store/RegistrationKey — that file is only
-# created for on-prem / hybrid activation). We look at journalctl AND the
-# on-disk log so the check still works on AMIs where journald is locked
-# down for our UID.
+# created for on-prem / hybrid activation).
+#
+# IMPORTANT: this script runs with `set -uo pipefail`. Any pipe stage
+# that returns non-zero (e.g. `tail` on a not-yet-created log file)
+# poisons the pipeline's exit code, so an earlier "{ journalctl; tail; }
+# | grep -q" version of this function silently returned 1 every time
+# when /var/log/amazon/ssm/amazon-ssm-agent.log hadn't been written
+# yet — even though the agent was perfectly healthy and journald had
+# `Credentials ready`. We test each source INDEPENDENTLY now, and try
+# several known log-file paths (location varies across agent versions
+# and AMIs).
 ssm_agent_local_online() {
   systemctl is-active --quiet amazon-ssm-agent 2>/dev/null || return 1
-  { journalctl -u amazon-ssm-agent --no-pager 2>/dev/null; tail -n 500 /var/log/amazon/ssm/amazon-ssm-agent.log 2>/dev/null; } \
-    | grep -qE "Credentials ready|EC2 registration was successful|Registration info found for ec2 instance|HealthCheck reporting agent health" \
-    && return 0
+  PAT='Credentials ready|EC2 registration was successful|Registration info found for ec2 instance|HealthCheck reporting agent health'
+  journalctl -u amazon-ssm-agent --no-pager -q 2>/dev/null | grep -qE "$PAT" && return 0
+  for F in /var/log/amazon/ssm/amazon-ssm-agent.log /var/log/amazon-ssm-agent.log /var/log/amazon/ssm/errors.log; do
+    [ -r "$F" ] && grep -qE "$PAT" "$F" 2>/dev/null && return 0
+  done
   return 1
 }
 while [ "$(date +%s)" -lt "$SSM_ONLINE_DEADLINE" ]; do
