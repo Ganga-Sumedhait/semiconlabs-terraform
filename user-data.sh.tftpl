@@ -48,6 +48,27 @@ systemctl daemon-reload 2>/dev/null || true
 lab_log "ssm: restart amazon-ssm-agent immediately after region drop-in (before any Run Command)"
 systemctl restart amazon-ssm-agent.service 2>/dev/null || systemctl restart amazon-ssm-agent 2>/dev/null || true
 
+# AWS CLI v1 uses ~/.aws/config [default] region. Some SSM workers do not inherit systemd
+# Environment=; without this, AWS-JoinDirectoryServiceDomain still calls `aws ds` in us-east-1.
+# LAB_AWSCLI_ROOT_CONFIG — marker for backend clone patcher (h).
+install -d /root/.aws
+cat >/root/.aws/config <<LAB_AWSCFG
+[default]
+region = $REGION
+LAB_AWSCFG
+chmod 600 /root/.aws/config 2>/dev/null || true
+lab_log "wrote /root/.aws/config default region=$REGION (SSM Run Command / join document)"
+if id ssm-user >/dev/null 2>&1; then
+  install -d /home/ssm-user/.aws
+  cat >/home/ssm-user/.aws/config <<LAB_AWSCFG2
+[default]
+region = $REGION
+LAB_AWSCFG2
+  chown -R ssm-user:ssm-user /home/ssm-user/.aws 2>/dev/null || true
+  chmod 600 /home/ssm-user/.aws/config 2>/dev/null || true
+  lab_log "wrote /home/ssm-user/.aws/config default region=$REGION"
+fi
+
 lab_log "start instance_id=$INSTANCE_ID enable_ad_join=${enable_ad_join} ad_mechanism=${ad_join_mechanism} dcv_console=${dcv_use_console_sessions}"
 lab_log "instance AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION (required for SSM domain-join document)"
 
