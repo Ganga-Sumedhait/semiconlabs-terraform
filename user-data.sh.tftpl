@@ -41,6 +41,12 @@ Environment=AWS_DEFAULT_REGION=$REGION
 Environment=AWS_REGION=$REGION
 SSMENV
 systemctl daemon-reload 2>/dev/null || true
+# The agent process must restart to pick up Environment= from the drop-in. If we only
+# reload+restart much later (AD phase), the backend's explicit AWS-JoinDirectoryServiceDomain
+# SendCommand right after Terraform apply runs first — `aws ds describe-directories` then
+# defaults to us-east-1 → "Cannot find parent directory Id" even for an ap-south-1 directory.
+lab_log "ssm: restart amazon-ssm-agent immediately after region drop-in (before any Run Command)"
+systemctl restart amazon-ssm-agent.service 2>/dev/null || systemctl restart amazon-ssm-agent 2>/dev/null || true
 
 lab_log "start instance_id=$INSTANCE_ID enable_ad_join=${enable_ad_join} ad_mechanism=${ad_join_mechanism} dcv_console=${dcv_use_console_sessions}"
 lab_log "instance AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION (required for SSM domain-join document)"
