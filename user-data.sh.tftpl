@@ -400,21 +400,36 @@ fi
 if [ ! -f /etc/sudoers.d/95-lab-cloud-users ]; then
   cat >/etc/sudoers.d/95-lab-cloud-users <<'LAB_SUDO_EOF'
 # Installed by lab-bootstrap; required for DCV/SSSD admin commands over SSH.
+# ssm-user: same as centos for `ssh ssm-user@host "sudo dcv ..."` (no TTY). SSM console
+# can work without this drop-in; backend automation cannot.
 Defaults:centos !requiretty
 Defaults:cloud-user !requiretty
 Defaults:ec2-user !requiretty
+Defaults:ssm-user !requiretty
 Defaults:rocky !requiretty
 Defaults:almalinux !requiretty
 Defaults:admin !requiretty
 centos     ALL=(ALL) NOPASSWD: ALL
 cloud-user ALL=(ALL) NOPASSWD: ALL
 ec2-user   ALL=(ALL) NOPASSWD: ALL
+ssm-user   ALL=(ALL) NOPASSWD: ALL
 rocky      ALL=(ALL) NOPASSWD: ALL
 almalinux  ALL=(ALL) NOPASSWD: ALL
 admin      ALL=(ALL) NOPASSWD: ALL
 LAB_SUDO_EOF
   chmod 0440 /etc/sudoers.d/95-lab-cloud-users
   lab_log "installed /etc/sudoers.d/95-lab-cloud-users (NOPASSWD for cloud/DCV users)"
+fi
+# Older labs: file exists without ssm-user — append so DCV over SSH as ssm-user matches centos.
+if [ -f /etc/sudoers.d/95-lab-cloud-users ] && ! grep -qE '^ssm-user[[:space:]]' /etc/sudoers.d/95-lab-cloud-users 2>/dev/null; then
+  printf '\n# Lab append: DCV/SSM over non-interactive SSH\nDefaults:ssm-user !requiretty\nssm-user ALL=(ALL) NOPASSWD: ALL\n' >>/etc/sudoers.d/95-lab-cloud-users
+  chmod 0440 /etc/sudoers.d/95-lab-cloud-users
+  if visudo -cf /etc/sudoers.d/95-lab-cloud-users 2>/tmp/lab-visudo.err; then
+    lab_log "appended ssm-user NOPASSWD to 95-lab-cloud-users (existing lab)"
+  else
+    lab_log "ERROR visudo rejected 95-lab-cloud-users after ssm-user append: $(tr -d '\r\n' </tmp/lab-visudo.err 2>/dev/null | head -c 400)"
+  fi
+  rm -f /tmp/lab-visudo.err 2>/dev/null || true
 fi
 
 %{ if ad_join_mechanism == "realm_userdata" ~}
@@ -675,7 +690,8 @@ systemctl reset-failed dcvserver 2>/dev/null || true
 
 # DCV must NOT auto-create a session at boot with a bogus owner. "%user%" in AWS/CloudLabs
 # samples is documentation shorthand, not a DCV substitution — it breaks login (owner:%user%).
-# Named virtual sessions are created by the app backend after SSH: dcv create-session 'SumedhaIT_<user>' --type virtual …
+# Named virtual sessions are created by the app backend after SSH, e.g.:
+#   sudo dcv create-session 'SumedhaIT_<user>' --owner '<upn>' --user '<posix>' --type virtual
 # See lab-docs/_dcv_doc_snippet.txt Step 3.3 (create-session=false).
 cat >/etc/dcv/dcv.conf <<'DCVBASE'
 [security]
@@ -684,6 +700,9 @@ pam-service-name="dcv"
 
 [session-management]
 create-session = false
+# Virtual sessions default to dcv-gl "default-on", which requires a DCV-GL license; without it the
+# X session often exits immediately and list-sessions stays empty after create-session returns 0.
+enable-gl-in-virtual-sessions = always-off
 
 [clipboard]
 enable=false

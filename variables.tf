@@ -201,7 +201,7 @@ variable "ad_dns_ips" {
 }
 
 variable "dcv_use_console_sessions" {
-  description = "Reserved / diagnostic only (logged in user-data). The backend creates DCV sessions over SSH; default session type is virtual (named SumedhaIT_<user>). Set LAB_DCV_SESSION_TYPE=console in the app only if you need the legacy fixed 'console' session id. dcv.conf uses create-session=false at boot; do not use a literal %user% owner."
+  description = "Reserved / diagnostic only (logged in user-data). Backend runs: dcv create-session '<id>' --owner '…' --user '…' --type virtual|console. Default app type is virtual (LAB_DCV_SESSION_TYPE). dcv.conf uses create-session=false at boot."
   type        = bool
   default     = false
 }
