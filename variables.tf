@@ -266,6 +266,14 @@ variable "lab_efs_tools_mount_codes" {
   }
 }
 
+# When VPC DNS cannot resolve the EFS DNS name, user-data calls `aws efs describe-mount-targets`
+# and mounts the mount-target IPv4 for this instance's subnet (bypasses resolver).
+variable "lab_efs_aws_ip_fallback" {
+  type        = bool
+  default     = true
+  description = "If true and DNS mount fails, resolve mount-target IP via AWS API and mount nfs4 by IP. Instance role needs elasticfilesystem:DescribeMountTargets."
+}
+
 # Base64(JSON) from the app at apply time: { session_user, source_files[], ad_groups_any[] }.
 # User-data decodes after AD join + SSSD, optionally verifies id -Gn against ad_groups_any (OR),
 # then writes /etc/profile.d to `source` each existing path (e.g. /efs/tools/PD). Empty = skip.
