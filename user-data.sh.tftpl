@@ -12,6 +12,130 @@ lab_log() {
   echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [lab-bootstrap] $*"
 }
 
+# After AD join + SSSD: optional EFS vendor env (PD etc.) for the lab session owner.
+# Payload (base64 JSON) is built by the backend from tool assignment + session user UPN.
+# If ad_groups_any is non-empty, we require id -Gn <user> to match at least one (OR) before
+# installing profile.d; otherwise we trust backend entitlement only.
+lab_install_efs_tool_profile_from_tf() {
+  local b64='${lab_efs_tool_profile_b64}'
+  local ad_dom='${lower_ad_domain}'
+  if [ -z "$${b64}" ]; then
+    lab_log "efs_tool_profile: skip (empty lab_efs_tool_profile_b64)"
+    return 0
+  fi
+  if ! command -v base64 >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    lab_log "WARN efs_tool_profile: need base64 and jq"
+    return 0
+  fi
+  local cfg
+  cfg=$(printf '%s' "$${b64}" | base64 -d 2>/dev/null) || true
+  if [ -z "$${cfg}" ]; then
+    lab_log "WARN efs_tool_profile: base64 decode failed or empty"
+    return 0
+  fi
+  if ! printf '%s' "$${cfg}" | jq -e . >/dev/null 2>&1; then
+    lab_log "WARN efs_tool_profile: JSON invalid after decode"
+    return 0
+  fi
+  local su
+  su=$(printf '%s' "$${cfg}" | jq -r '.session_user // empty' 2>/dev/null | tr -d '\r\n' | head -c 512)
+  if [ -z "$${su}" ]; then
+    lab_log "WARN efs_tool_profile: missing session_user in payload"
+    return 0
+  fi
+  local short="$${su%%@*}"
+  local resolved=""
+  local gf
+  gf=$(mktemp /tmp/lab-efs-groups.XXXXXX 2>/dev/null || true)
+  [ -n "$${gf}" ] || gf=/tmp/lab-efs-groups.$$
+  : >"$${gf}"
+  printf '%s' "$${cfg}" | jq -r '.ad_groups_any[]?' 2>/dev/null | tr -d '\r' | sed '/^$/d' | head -n 128 >"$${gf}" || true
+  local gate_ok=1
+  if [ -s "$${gf}" ]; then
+    gate_ok=0
+    local max_try=40
+    local n=0
+    while [ "$${n}" -lt "$${max_try}" ]; do
+      n=$((n + 1))
+      resolved=""
+      for cand in "$${su}" "$${short}" "$${short}@$${ad_dom}"; do
+        [ -z "$${cand}" ] && continue
+        if id "$${cand}" >/dev/null 2>&1; then
+          resolved="$${cand}"
+          break
+        fi
+      done
+      if [ -n "$${resolved}" ]; then
+        local gline
+        gline=$(id -Gn "$${resolved}" 2>/dev/null || true)
+        if [ -n "$${gline}" ]; then
+          while IFS= read -r greq || [ -n "$${greq}" ]; do
+            greq=$(echo "$${greq}" | tr -d '\r\n' | xargs)
+            [ -z "$${greq}" ] && continue
+            if printf ' %s ' "$${gline}" | grep -Fq " $${greq} "; then
+              gate_ok=1
+              lab_log "efs_tool_profile: AD group gate OK (user=$${resolved} matched group=$${greq})"
+              break
+            fi
+          done < "$${gf}"
+        fi
+      fi
+      if [ "$${gate_ok}" = "1" ]; then
+        break
+      fi
+      if [ "$${n}" -eq 1 ] || [ $$(( n % 8 )) -eq 0 ]; then
+        lab_log "efs_tool_profile: waiting for NSS/SSSD + group membership (user=$${su}, try $${n}/$${max_try}, resolved=$${resolved:-empty})"
+      fi
+      sleep 15
+    done
+  fi
+  rm -f "$${gf}" 2>/dev/null || true
+  if [ "$${gate_ok}" != "1" ]; then
+    lab_log "WARN efs_tool_profile: AD group gate failed or user '$${su}' not resolvable — not installing EFS tool profile.d"
+    return 0
+  fi
+  install -d /etc/lab
+  printf '%s' "$${cfg}" | jq -r '.source_files[]?' 2>/dev/null | tr -d '\r' | sed '/^$/d' | head -n 64 >/etc/lab/efs-tool-sources.lst || true
+  if [ ! -s /etc/lab/efs-tool-sources.lst ]; then
+    lab_log "WARN efs_tool_profile: no source_files in payload"
+    return 0
+  fi
+  cat >/etc/profile.d/zz-lab-efs-tools.sh <<'ZZLABEFS'
+#!/bin/sh
+# Installed by lab-bootstrap: source EFS tool env files (PD, etc.) for interactive shells / DCV.
+[ -r /etc/lab/efs-tool-sources.lst ] || exit 0
+while IFS= read -r f || [ -n "$f" ]; do
+  case "$f" in ''|'#'*) continue;; esac
+  if [ -f "$f" ]; then
+    # shellcheck disable=SC1090
+    . "$f"
+  fi
+done < /etc/lab/efs-tool-sources.lst
+ZZLABEFS
+  chmod 644 /etc/profile.d/zz-lab-efs-tools.sh 2>/dev/null || true
+  {
+    echo '{'
+    echo '  "efs_profile_installed": true,'
+    echo '  "note": "exists_at_install is recorded at cloud-init; profile.d sources these paths at interactive shell/DCV login.",'
+    echo "  \"checked_utc\": \"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+    echo '  "profile_d": "/etc/profile.d/zz-lab-efs-tools.sh",'
+    echo '  "sources": ['
+    first=1
+    while IFS= read -r f || [ -n "$${f}" ]; do
+      case "$${f}" in ''|'#'*) continue;; esac
+      esc=$(printf '%s' "$${f}" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+      if [ "$${first}" = 1 ]; then first=0; else echo ','; fi
+      if [ -f "$${f}" ]; then ex=true; else ex=false; fi
+      printf '    {"path":"%s","exists_at_install":%s}' "$${esc}" "$${ex}"
+    done </etc/lab/efs-tool-sources.lst
+    echo ''
+    echo '  ]'
+    echo '}'
+  } >/etc/lab/efs-tool-profile-status.json 2>/dev/null || true
+  chmod 644 /etc/lab/efs-tool-profile-status.json 2>/dev/null || true
+  lab_log "efs_tool_profile: installed /etc/profile.d/zz-lab-efs-tools.sh (sources=$$(wc -l </etc/lab/efs-tool-sources.lst) lines); wrote /etc/lab/efs-tool-profile-status.json"
+}
+
 # Install AWS CLI v2 to /usr/local/bin. RPM awscli v1 often fails or mis-resolves region for
 # ssm:GetParameter / secretsmanager from user-data (empty password -> adcli join skipped).
 lab_ensure_awscli_v2() {
@@ -110,6 +234,19 @@ lab_finalize_sssd_for_dcv() {
     chmod 600 /etc/sssd/sssd.conf 2>/dev/null || true
   else
     lab_log "finalize_sssd_for_dcv: skip default_shell (already set or no domain section)"
+  fi
+  if [ -f /etc/sssd/sssd.conf ] && grep -Fq "[domain/$${DOM}]" /etc/sssd/sssd.conf 2>/dev/null && ! grep -q '^override_shell' /etc/sssd/sssd.conf 2>/dev/null; then
+    lab_log "finalize_sssd_for_dcv: inserting override_shell=$${SH} (interactive shell for DCV/SSH; ignores restrictive AD loginShell)"
+    if grep -q '^default_shell' /etc/sssd/sssd.conf 2>/dev/null; then
+      awk -v line="override_shell = $${SH}" '/^default_shell/ { print; print line; next } { print }' /etc/sssd/sssd.conf > /tmp/sssd.lab.ov.$$ \
+        && mv /tmp/sssd.lab.ov.$$ /etc/sssd/sssd.conf || rm -f /tmp/sssd.lab.ov.$$
+    else
+      awk -v dom="[domain/$${DOM}]" -v line="override_shell = $${SH}" '$0 == dom { print; print line; next } { print }' /etc/sssd/sssd.conf > /tmp/sssd.lab.ov.$$ \
+        && mv /tmp/sssd.lab.ov.$$ /etc/sssd/sssd.conf || rm -f /tmp/sssd.lab.ov.$$
+    fi
+    chmod 600 /etc/sssd/sssd.conf 2>/dev/null || true
+  else
+    lab_log "finalize_sssd_for_dcv: skip override_shell (already set or no domain section)"
   fi
   if command -v authselect >/dev/null 2>&1; then
     lab_log "finalize_sssd_for_dcv: authselect sssd with-mkhomedir"
@@ -326,6 +463,7 @@ cache_credentials = True
 id_provider = ad
 krb5_store_password_if_offline = True
 default_shell = ${ad_sssd_default_shell}
+override_shell = ${ad_sssd_default_shell}
 ldap_id_mapping = True
 use_fully_qualified_names = False
 fallback_homedir = /home/%u
@@ -646,6 +784,7 @@ PAMDCV
 fi
 
 lab_log "AD phase finished"
+lab_install_efs_tool_profile_from_tf || true
 %{ endif ~}
 
 lab_log "DCV: /etc dcvserver.service (strip [Service] ExecStartPre) + late drop-in + dcv.conf boot auto-session=false web_all=${dcv_web_listen_all} (tf dcv_use_console_sessions=${dcv_use_console_sessions})"

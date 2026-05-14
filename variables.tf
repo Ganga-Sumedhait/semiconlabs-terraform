@@ -239,9 +239,18 @@ variable "ad_fallback_adcli_after_ssm" {
 }
 
 variable "ad_sssd_default_shell" {
-  description = "Inserted into sssd.conf under [domain/<dns>] after join if default_shell is absent (DCV/SSH login shell)."
+  description = "SSSD domain default_shell and override_shell (interactive login for DCV/SSH when AD loginShell is empty or /bin/false). Written in sssd.conf and patched by lab_finalize_sssd_for_dcv if missing."
   type        = string
   default     = "/bin/bash"
+}
+
+# Base64(JSON) from the app at apply time: { session_user, source_files[], ad_groups_any[] }.
+# User-data decodes after AD join + SSSD, optionally verifies id -Gn against ad_groups_any (OR),
+# then writes /etc/profile.d to `source` each existing path (e.g. /efs/tools/PD). Empty = skip.
+variable "lab_efs_tool_profile_b64" {
+  type        = string
+  default     = ""
+  description = "Base64(JSON): { session_user, source_files[], ad_groups_any[] }. Backend sets when lab tool warrants EFS tool env (e.g. PD)."
 }
 
 #resource "aws_iam_instance_profile" "ssm_profile" {
