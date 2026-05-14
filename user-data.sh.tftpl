@@ -246,15 +246,23 @@ else
   lab_log "WARN EFS: coreutils 'timeout' missing; skipping EFS mount to avoid blocking bootstrap"
 fi
 
-# AWS CLI v2 + AWSBIN for EC2 tags and (when enabled) SSM/Secrets reads — must run even if enable_ad_join=false.
+# AWS CLI v2 — use lab_aws() for all CLI calls. Avoid `$$($${AWSBIN} ...)` in rendered user-data: some
+# pipelines leave a literal `$$` before `(`, so bash treats `$$` as PID and fails with "unexpected token `('".
 lab_ensure_awscli_v2 || true
 if [ -x /usr/local/bin/aws ]; then
   export PATH="/usr/local/bin:/usr/local/sbin:$${PATH}"
 fi
-AWSBIN="/usr/local/bin/aws"
-if [ ! -x "$${AWSBIN}" ]; then AWSBIN=$(command -v aws || echo aws); fi
-LAB_AWS_VER=$$($${AWSBIN} --version 2>&1 | head -1) || true
-lab_log "bootstrap AWSBIN=$${AWSBIN} ($${LAB_AWS_VER})"
+lab_aws() {
+  if [ -x /usr/local/bin/aws ]; then
+    /usr/local/bin/aws "$@"
+  elif command -v aws >/dev/null 2>&1; then
+    aws "$@"
+  else
+    lab_log "ERROR lab_aws: aws CLI not found"
+    return 127
+  fi
+}
+lab_log "bootstrap aws: $$(lab_aws --version 2>&1 | head -1)"
 
 %{ if enable_ad_join ~}
 lab_log "AD phase: mechanism=${ad_join_mechanism} domain=${ad_domain}"
@@ -417,7 +425,7 @@ fi
 %{ else ~}
 lab_log "realm_userdata: reading join password from AWS (Secrets Manager or SSM)"
 %{ if ad_join_password_secretsmanager_secret_id != "" ~}
-JOIN_PW=$$($${AWSBIN} secretsmanager get-secret-value \
+JOIN_PW=$$(lab_aws secretsmanager get-secret-value \
   --region "$${REGION}" \
   --secret-id '${ad_join_password_secretsmanager_secret_id}' \
   --query SecretString \
@@ -428,7 +436,7 @@ if command -v jq >/dev/null 2>&1 && [ -n "$${JOIN_PW}" ] && printf '%s' "$${JOIN
   [ -z "$${JOIN_PW}" ] && JOIN_PW="$${PW_RAW_SM}"
 fi
 %{ else ~}
-JOIN_PW=$$($${AWSBIN} ssm get-parameter \
+JOIN_PW=$$(lab_aws ssm get-parameter \
   --region "$${REGION}" \
   --name "${ad_join_password_ssm_parameter_name}" \
   --with-decryption \
@@ -538,7 +546,7 @@ if [ "$${JOINED}" != "1" ]; then
   JOIN_PW_FB=$(printf '%s' '${ad_join_password_b64}' | base64 -d) || true
 %{ else ~}
 %{ if ad_join_password_secretsmanager_secret_id != "" ~}
-  JOIN_PW_FB=$$($${AWSBIN} secretsmanager get-secret-value \
+  JOIN_PW_FB=$$(lab_aws secretsmanager get-secret-value \
     --region "$${REGION}" \
     --secret-id '${ad_join_password_secretsmanager_secret_id}' \
     --query SecretString \
@@ -549,7 +557,7 @@ if [ "$${JOINED}" != "1" ]; then
     [ -z "$${JOIN_PW_FB}" ] && JOIN_PW_FB="$${PW_RAW_SM_FB}"
   fi
 %{ else ~}
-  JOIN_PW_FB=$$($${AWSBIN} ssm get-parameter \
+  JOIN_PW_FB=$$(lab_aws ssm get-parameter \
     --region "$${REGION}" \
     --name "${ad_join_password_ssm_parameter_name}" \
     --with-decryption \
@@ -686,10 +694,10 @@ systemctl enable sssd || true
 systemctl restart sssd || true
 lab_log "final sssd restart before READY tag"
 
-$${AWSBIN} ec2 create-tags \
+lab_aws ec2 create-tags \
   --region ${aws_region} \
   --resources "$${INSTANCE_ID}" \
   --tags Key=LabBootstrap,Value=READY
 
-lab_log "BOOTSTRAP COMPLETE — verify AD: realm list; DCV: ss -tlnp | grep 8443; log=$LOG"
+lab_log "BOOTSTRAP COMPLETE — verify AD: getent passwd <user>; sssctl domain-status; DCV: ss -tlnp | grep 8443; log=$LOG"
 echo "========== BOOTSTRAP COMPLETE =========="
