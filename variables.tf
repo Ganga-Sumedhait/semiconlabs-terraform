@@ -258,8 +258,8 @@ variable "lab_efs_nfs_host" {
 # After root mount on /efs, user-data mkdirs /efs/tools/<code> on the same filesystem (PD / DV / AL). Not separate NFS mounts.
 variable "lab_efs_tools_mount_codes" {
   type        = list(string)
-  default     = ["PD", "DV", "AL"]
-  description = "Per IT runbook: after nfs root on /efs, user-data bind-mounts /efs/tools/<code> → /<code> (e.g. PD → /PD), appends matching fstab bind lines, verifies, then tries umount /efs. Narrow list per lab (e.g. [\"DV\"]) so only that product path is exposed. Empty [] skips binds and umount."
+  default     = []
+  description = "Per IT runbook: after nfs root on /efs, user-data bind-mounts /efs/tools/<code> → /<code> for each code (PD/DV/AL). Set per learner domain at apply time (e.g. [\"PD\"] only). Empty [] = root /efs only, no /PD /DV /AL binds."
   validation {
     condition     = length(var.lab_efs_tools_mount_codes) == 0 || alltrue([for c in var.lab_efs_tools_mount_codes : contains(["PD", "DV", "AL"], c)])
     error_message = "lab_efs_tools_mount_codes must be empty or contain only PD, DV, or AL."
