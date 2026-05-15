@@ -248,18 +248,18 @@ variable "ad_sssd_default_shell" {
   default     = "/bin/tcsh"
 }
 
-# EFS NFS host (DNS only, no ":/" suffix). Root mount uses host:/ ; tool mounts use host:/efs/tools/<code> .
+# EFS NFS host (DNS only, no ":/" suffix). User-data mounts nfs4 host:/ once to /efs (EFS does not export subpaths as separate NFS roots).
 variable "lab_efs_nfs_host" {
   type        = string
   default     = "fs-0985e64c096c42f09.efs.ap-south-1.amazonaws.com"
-  description = "EFS filesystem DNS name for lab mounts (same region as instance). Empty string skips all EFS mounts in user-data."
+  description = "EFS filesystem DNS name for lab mounts (same region as instance). Empty string skips all EFS logic in user-data."
 }
 
-# Bind-mount EFS tool trees under /efs/tools/<code> (PD / DV / AL). Narrow per product, e.g. [\"PD\"] only for PD labs.
+# After root mount on /efs, user-data mkdirs /efs/tools/<code> on the same filesystem (PD / DV / AL). Not separate NFS mounts.
 variable "lab_efs_tools_mount_codes" {
   type        = list(string)
   default     = ["PD", "DV", "AL"]
-  description = "Which /efs/tools/<code> subtrees to NFS-mount. Match learner AD group / lab product; empty [] skips tool submounts (root /efs still mounts when lab_efs_nfs_host is set)."
+  description = "Which /efs/tools/<code> directories to create under the single EFS root mount. Match learner AD group / lab product; empty [] skips mkdir only (root /efs still mounts when lab_efs_nfs_host is set)."
   validation {
     condition     = length(var.lab_efs_tools_mount_codes) == 0 || alltrue([for c in var.lab_efs_tools_mount_codes : contains(["PD", "DV", "AL"], c)])
     error_message = "lab_efs_tools_mount_codes must be empty or contain only PD, DV, or AL."

@@ -389,7 +389,7 @@ fi
 EFS_DNS='${trimspace(lab_efs_nfs_host)}'
 EFS_SRC="$${EFS_DNS}:/"
 TOOLS_LIST='${join(" ", lab_efs_tools_mount_codes)}'
-lab_log "EFS: attempting mounts for $${EFS_DNS} (DNS first; max 90s each; failures non-fatal)"
+lab_log "EFS: attempting root nfs4 mount for $${EFS_DNS} (DNS first; tool dirs under /efs after mount; failures non-fatal)"
 mkdir -p /efs
 if command -v getent >/dev/null 2>&1; then
   lab_log "EFS: DNS getent ahosts $${EFS_DNS}: $(getent ahosts "$${EFS_DNS}" 2>&1 | head -n 3 | tr '\n' ' ' | head -c 220)"
@@ -405,24 +405,16 @@ if command -v timeout >/dev/null 2>&1; then
   else
     lab_log "WARN EFS: root mount via DNS failed (will try IP fallback if enabled)"
   fi
-%{ for code in lab_efs_tools_mount_codes ~}
-  mkdir -p /efs/tools/${code}
-  if timeout 90 mount -t nfs4 -o nfsvers=4.1,_netdev,timeo=30,retrans=3,noresvport \
-    "$${EFS_DNS}:/efs/tools/${code}" "/efs/tools/${code}" 2>&1; then
-    lab_log "EFS: mounted /efs/tools/${code} via DNS"
-  else
-    lab_log "WARN EFS: mount via DNS failed for /efs/tools/${code}"
-  fi
-%{ endfor ~}
 else
   lab_log "WARN EFS: coreutils 'timeout' missing; skipping EFS mount to avoid blocking bootstrap"
 fi
 %{ if lab_efs_aws_ip_fallback ~}
 if ! grep -qE '[[:space:]]/efs[[:space:]]+nfs' /proc/mounts 2>/dev/null; then
   lab_log "EFS: attempting mount-target IP fallback (DescribeMountTargets; bypasses VPC DNS issues)"
-  EFS_FSID=$(printf '%s\n' "$${EFS_DNS}" | sed -n 's/^\\(fs-[^.]*\\)\\..*/\\1/p')
-  if [ -z "$EFS_FSID" ] || [ "$EFS_FSID" = "$EFS_DNS" ]; then
-    lab_log "WARN EFS: could not parse fs-xxxx id from EFS_DNS=$EFS_DNS"
+  # Bash-only: first label before '.' is always fs-xxxx for standard EFS DNS (avoids sed/escape issues in .tftpl).
+  EFS_FSID="$${EFS_DNS%%.*}"
+  if [ -z "$EFS_FSID" ] || [[ "$EFS_FSID" != fs-* ]]; then
+    lab_log "WARN EFS: could not derive fs-xxxx from EFS_DNS=$EFS_DNS (got '$EFS_FSID')"
   elif ! command -v aws >/dev/null 2>&1; then
     lab_log "WARN EFS: aws CLI missing — cannot run IP fallback"
   else
@@ -442,15 +434,6 @@ if ! grep -qE '[[:space:]]/efs[[:space:]]+nfs' /proc/mounts 2>/dev/null; then
         else
           lab_log "WARN EFS: root mount via IP failed"
         fi
-        for c in $TOOLS_LIST; do
-          [ -z "$c" ] && continue
-          mkdir -p "/efs/tools/$c" 2>/dev/null || true
-          if timeout 90 mount -t nfs4 -o nfsvers=4.1,_netdev,timeo=30,retrans=3,noresvport "$${MT_IP}:/efs/tools/$c" "/efs/tools/$c" 2>&1; then
-            lab_log "EFS: mounted /efs/tools/$c via IP"
-          else
-            lab_log "WARN EFS: IP mount failed for /efs/tools/$c"
-          fi
-        done
       fi
     else
       lab_log "WARN EFS: DescribeMountTargets returned no IP (IAM needs elasticfilesystem:DescribeMountTargets; EFS mount targets must exist in this VPC/region)"
@@ -458,6 +441,23 @@ if ! grep -qE '[[:space:]]/efs[[:space:]]+nfs' /proc/mounts 2>/dev/null; then
   fi
 fi
 %{ endif ~}
+# EFS NFSv4.1 exposes only the filesystem root (mount host:/ or IP:/). Subpaths like host:/efs/tools/DV are not
+# separate exports — use one root mount on /efs, then /efs/tools/<code> is the path on that filesystem.
+if command -v findmnt >/dev/null 2>&1 && findmnt -n /efs >/dev/null 2>&1; then
+  for c in $TOOLS_LIST; do
+    [ -z "$c" ] && continue
+    if mkdir -p "/efs/tools/$c" 2>/dev/null; then
+      lab_log "EFS: ensured /efs/tools/$c (under root mount; no separate NFS submount)"
+    else
+      lab_log "WARN EFS: mkdir /efs/tools/$c failed (permissions or read-only)"
+    fi
+  done
+elif grep -qE '[[:space:]]/efs[[:space:]]+nfs' /proc/mounts 2>/dev/null; then
+  for c in $TOOLS_LIST; do
+    [ -z "$c" ] && continue
+    mkdir -p "/efs/tools/$c" 2>/dev/null && lab_log "EFS: ensured /efs/tools/$c" || lab_log "WARN EFS: mkdir /efs/tools/$c failed"
+  done
+fi
 if command -v findmnt >/dev/null 2>&1 && findmnt -n /efs >/dev/null 2>&1; then
   lab_log "EFS: SUMMARY OK — /efs is mounted ($(findmnt -n -o SOURCE,FSTYPE /efs 2>/dev/null | tr '\n' ' '))"
 elif grep -qE '[[:space:]]/efs[[:space:]]+nfs' /proc/mounts 2>/dev/null; then
