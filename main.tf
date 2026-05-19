@@ -54,6 +54,7 @@ resource "aws_instance" "CentOS8-AMD" {
     ad_domain                             = var.ad_domain
     ad_krb5_realm                         = local.ad_krb5_realm
     lower_ad_domain                       = local.lower_ad_domain
+    ad_extra_upn_suffixes                 = var.ad_extra_upn_suffixes
     ad_join_user                            = var.ad_join_user
     ad_join_password_b64                    = trimspace(var.ad_join_password) != "" ? base64encode(var.ad_join_password) : ""
     ad_join_password_ssm_parameter_name   = var.ad_join_password_ssm_parameter_name

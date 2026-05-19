@@ -156,6 +156,12 @@ variable "ad_domain" {
   default     = "sumedhalabs.com"
 }
 
+variable "ad_extra_upn_suffixes" {
+  description = "Alternate portal UPN DNS suffixes mapped to the forest Kerberos realm in guest /etc/krb5.conf (e.g. gmail.com for user@gmail.com logon)."
+  type        = list(string)
+  default     = ["sumedhait.com", "gmail.com"]
+}
+
 variable "ad_join_user" {
   description = <<-EOT
     Account used for domain join. Use the **sAMAccountName** (e.g. delegated slabs-user) or UPN with **Kerberos realm**

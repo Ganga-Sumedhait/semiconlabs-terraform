@@ -808,6 +808,10 @@ else
     echo "[domain_realm]"
     echo " .${lower_ad_domain} = ${ad_krb5_realm}"
     echo " ${lower_ad_domain} = ${ad_krb5_realm}"
+%{ for suffix in ad_extra_upn_suffixes ~}
+    echo " .${suffix} = ${ad_krb5_realm}"
+    echo " ${suffix} = ${ad_krb5_realm}"
+%{ endfor ~}
   } > /etc/krb5.conf
 %{ endif ~}
 
