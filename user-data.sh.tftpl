@@ -410,7 +410,7 @@ lab_efs_log() {
 [ -r /etc/lab/efs-mount.env ] || { lab_efs_log "missing /etc/lab/efs-mount.env"; exit 1; }
 # shellcheck source=/dev/null
 . /etc/lab/efs-mount.env
-EFS_SRC="${EFS_DNS}:/"
+EFS_SRC="$${EFS_DNS}:/"
 lab_efs_nfs_mounted() {
   grep -qE '[[:space:]]/efs[[:space:]]+nfs' /proc/mounts 2>/dev/null
 }
@@ -430,8 +430,8 @@ lab_efs_mount_root() {
     return 1
   fi
   if timeout 90 mount -t nfs4 -o nfsvers=4.1,_netdev,timeo=30,retrans=3,noresvport \
-    "${server}:/" /efs 2>&1 | tee -a "$LOG"; then
-    lab_efs_log "mounted /efs via ${server}:/"
+    "$${server}:/" /efs 2>&1 | tee -a "$LOG"; then
+    lab_efs_log "mounted /efs via $${server}:/"
     return 0
   fi
   return 1
@@ -445,7 +445,7 @@ lab_efs_mount_dns() {
   return 1
 }
 lab_efs_mount_api_fallback() {
-  [ "${LAB_EFS_AWS_IP_FALLBACK:-false}" = "true" ] || return 1
+  [ "$${LAB_EFS_AWS_IP_FALLBACK:-false}" = "true" ] || return 1
   lab_efs_nfs_mounted && return 0
   command -v aws >/dev/null 2>&1 || return 1
   local token mac subnet fsid mt_ip err
@@ -454,12 +454,12 @@ lab_efs_mount_api_fallback() {
   mac=$(curl -sf --max-time 3 -H "X-aws-ec2-metadata-token: $token" \
     "http://169.254.169.254/latest/meta-data/mac" 2>/dev/null || true)
   subnet=$(curl -sf --max-time 3 -H "X-aws-ec2-metadata-token: $token" \
-    "http://169.254.169.254/latest/meta-data/network/interfaces/macs/${mac}/subnet-id" 2>/dev/null || true)
-  fsid="${EFS_DNS%%.*}"
+    "http://169.254.169.254/latest/meta-data/network/interfaces/macs/$${mac}/subnet-id" 2>/dev/null || true)
+  fsid="$${EFS_DNS%%.*}"
   [[ "$fsid" == fs-* ]] || return 1
   err=$(mktemp 2>/dev/null || echo /tmp/efs-mt-err)
   mt_ip=$(aws efs describe-mount-targets --file-system-id "$fsid" --region "$REGION" --output text \
-    --query "MountTargets[?SubnetId=='${subnet}' && LifeCycleState=='available'].IpAddress" 2>"$err" | awk 'NF{print; exit}')
+    --query "MountTargets[?SubnetId=='$${subnet}' && LifeCycleState=='available'].IpAddress" 2>"$err" | awk 'NF{print; exit}')
   if [ -z "$mt_ip" ] || [ "$mt_ip" = "None" ]; then
     mt_ip=$(aws efs describe-mount-targets --file-system-id "$fsid" --region "$REGION" --output text \
       --query "MountTargets[?LifeCycleState=='available'].IpAddress" 2>>"$err" | awk 'NF{print; exit}')
@@ -468,14 +468,14 @@ lab_efs_mount_api_fallback() {
   [ -n "$mt_ip" ] && [ "$mt_ip" != "None" ] && lab_efs_mount_root "$mt_ip"
 }
 lab_efs_resolve_server() {
-  if [ -n "${EFS_STATIC_IP:-}" ]; then
+  if [ -n "$${EFS_STATIC_IP:-}" ]; then
     echo "$EFS_STATIC_IP"
     return 0
   fi
   if lab_efs_nfs_mounted; then
     local src
     src=$(awk '$2=="/efs" && ($3=="nfs4" || $3=="nfs") {print $1; exit}' /proc/mounts 2>/dev/null || true)
-    [ -n "$src" ] && echo "${src%%:/*}" && return 0
+    [ -n "$src" ] && echo "$${src%%:/*}" && return 0
   fi
   if command -v getent >/dev/null 2>&1; then
     getent ahosts "$EFS_DNS" 2>/dev/null | awk 'NR==1{print $1; exit}'
@@ -493,8 +493,8 @@ lab_efs_mount_tool_direct() {
     return 0
   fi
   if timeout 90 mount -t nfs4 -o nfsvers=4.1,_netdev,timeo=30,retrans=3,noresvport \
-    "${server}:/tools/${c}" "/$c" 2>&1 | tee -a "$LOG"; then
-    lab_efs_log "direct mount ${server}:/tools/${c} -> /$c"
+    "$${server}:/tools/$${c}" "/$c" 2>&1 | tee -a "$LOG"; then
+    lab_efs_log "direct mount $${server}:/tools/$${c} -> /$c"
     return 0
   fi
   return 1
@@ -554,7 +554,7 @@ lab_efs_bind_tools() {
   lab_efs_bind_tools_via_root
   lab_efs_hide_efs_root
 }
-lab_efs_log "start EFS_DNS=$EFS_DNS static_ip=${EFS_STATIC_IP:-none} tools=[$TOOLS_LIST] (no fstab; explicit nfs4 mount)"
+lab_efs_log "start EFS_DNS=$EFS_DNS static_ip=$${EFS_STATIC_IP:-none} tools=[$TOOLS_LIST] (no fstab; explicit nfs4 mount)"
 # Try direct subpath mounts first (no /efs root — learners only see assigned /PD|/DV|/AL).
 if [ -n "$(echo $TOOLS_LIST | tr -d '[:space:]')" ]; then
   _srv=$(lab_efs_resolve_server 2>/dev/null || true)
@@ -577,7 +577,7 @@ if [ -n "$(echo $TOOLS_LIST | tr -d '[:space:]')" ]; then
     lab_efs_log "direct subpath incomplete (ok=$_ok fail=$_fail); trying /efs root + bind"
   fi
 fi
-if [ -n "${EFS_STATIC_IP:-}" ]; then
+if [ -n "$${EFS_STATIC_IP:-}" ]; then
   lab_efs_mount_root "$EFS_STATIC_IP" || true
 fi
 lab_efs_mount_dns || true
