@@ -645,8 +645,15 @@ lab_efs_verify_required_mounts() {
   done
   if mountpoint -q /tools 2>/dev/null; then
     lab_efs_log "VERIFY OK: /tools mounted"
+    if [ -f /tools/yam4tp ]; then
+      lab_efs_log "VERIFY OK: /tools/yam4tp present"
+    else
+      lab_efs_log "VERIFY WARN: /tools/yam4tp missing"
+      fail=1
+    fi
   else
-    lab_efs_log "VERIFY WARN: /tools not mounted (pdsource may error on yam4tp)"
+    lab_efs_log "VERIFY FAIL: /tools not mounted (pdsource needs yam4tp)"
+    fail=1
   fi
   return $fail
 }
@@ -759,13 +766,34 @@ lab_te_source_candidates() {
   local code u
   code=$(echo "$1" | tr '[:lower:]' '[:upper:]')
   case "$code" in
-    PD) u=pdsource ;;
-    AL) u=alsource ;;
-    DV) u=dvsource ;;
+    PD)
+      u=pdsource
+      echo "/$code/snps/$u"
+      echo "/$code/cdn/$u"
+      echo "/$code/cdn/cdnsource"
+      echo "/$code/$u"
+      echo "/efs/tools/$code/snps/$u"
+      echo "/efs/tools/$code/cdn/$u"
+      echo "/efs/tools/$code/$u"
+      ;;
+    AL)
+      u=alsource
+      echo "/$code/cdn/$u"
+      echo "/$code/$u"
+      echo "/efs/tools/$code/cdn/$u"
+      echo "/efs/tools/$code/$u"
+      ;;
+    DV)
+      u=dvsource
+      echo "/$code/snps/$u"
+      echo "/$code/cdn/$u"
+      echo "/$code/$u"
+      echo "/efs/tools/$code/snps/$u"
+      echo "/efs/tools/$code/cdn/$u"
+      echo "/efs/tools/$code/$u"
+      ;;
     *) return 1 ;;
   esac
-  echo "/$code/$u"
-  echo "/efs/tools/$code/$u"
 }
 lab_te_resolve_source() {
   local code f
@@ -837,14 +865,23 @@ foreach f (`grep -v '^[[:space:]]*#' /etc/lab/efs-tool-sources.lst | grep -v '^[
     switch ($f)
     case /PD/pdsource:
     case /efs/tools/PD/pdsource:
+    case /PD/snps/pdsource:
+    case /PD/cdn/pdsource:
+    case /PD/cdn/cdnsource:
+    case /efs/tools/PD/snps/pdsource:
+    case /efs/tools/PD/cdn/pdsource:
       cd /PD
       breaksw
     case /AL/alsource:
     case /efs/tools/AL/alsource:
+    case /AL/cdn/alsource:
+    case /efs/tools/AL/cdn/alsource:
       cd /AL
       breaksw
     case /DV/dvsource:
     case /efs/tools/DV/dvsource:
+    case /DV/snps/dvsource:
+    case /DV/cdn/dvsource:
       cd /DV
       breaksw
     endsw
@@ -855,7 +892,15 @@ end
 if ( $$?ICC2_HOME ) then
   if ( ! -d "$$ICC2_HOME" ) then
     set _iccfix = `echo "$$ICC2_HOME" | sed -e 's|^/efs/tools/PD|/PD|' -e 's|^/efs/tools/AL|/AL|' -e 's|^/efs/tools/DV|/DV|'`
+    if ( ! -d "$$_iccfix" ) then
+      set _iccfix = `echo "$$ICC2_HOME" | sed -e 's|^/efs/tools/PD/snps|/PD/snps|' -e 's|^/efs/tools/PD/cdn|/PD/cdn|'`
+    endif
     if ( -d "$$_iccfix" ) setenv ICC2_HOME "$$_iccfix"
+  endif
+  if ( -d "$$ICC2_HOME/linux64/bin" ) then
+    set path = ( "$$ICC2_HOME/linux64/bin" $$path )
+  else if ( -d "$$ICC2_HOME/bin" ) then
+    set path = ( "$$ICC2_HOME/bin" $$path )
   endif
 endif
 endif
