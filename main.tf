@@ -41,9 +41,9 @@ locals {
     lab_efs_aws_ip_fallback               = var.lab_efs_aws_ip_fallback
     lab_efs_mount_target_ip               = var.lab_efs_mount_target_ip
     lab_efs_tool_profile_b64              = var.lab_efs_tool_profile_b64
-    lab_ssh_public_key_b64 = base64encode(
-      trimspace(tls_private_key.master_key_gen.public_key_openssh),
-    )
+    # Keep empty: embedding the full OpenSSH line in user-data pushes gzip over EC2's 16 KiB cap.
+    # Backend injects the same key via SSM after boot (see terraform.service lab-ssh-key-inject).
+    lab_ssh_public_key_b64 = ""
   }
   lab_user_data_rendered = templatefile("${path.module}/user-data.sh.tftpl", local.lab_user_data_template_vars)
   lab_user_data_gzip_b64 = base64gzip(local.lab_user_data_rendered)
