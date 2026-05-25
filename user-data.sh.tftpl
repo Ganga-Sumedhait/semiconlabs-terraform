@@ -1203,6 +1203,7 @@ if [ -f /etc/sudoers.d/95-lab-cloud-users ] && ! grep -qE '^ssm-user[[:space:]]'
 fi
 
 %{ if ad_join_mechanism == "realm_userdata" ~}
+LAB_AD_JOIN_OK=0
 lab_log "realm_userdata: preparing join password"
 JOIN_PW=""
 CRED_ERR=/tmp/lab-ad-cred-fetch.err
@@ -1307,14 +1308,17 @@ else
 
   if retry 5 do_adcli_join_cloudlabs_doc; then
     lab_log "realm_userdata: adcli join OK (CloudLabs DCV guide Step 4.4; lab-docs/_dcv_doc_snippet.txt)"
+    LAB_AD_JOIN_OK=1
     lab_write_sssd_conf_cloudlabs_doc
     lab_finalize_sssd_for_dcv
   else
     lab_log "ERROR realm_userdata: adcli join failed after retries (guide: Steps 4.2–4.4, password, chronyc makestep)" >&2
+    LAB_AD_JOIN_OK=0
   fi
   unset JOIN_PW
 fi
 %{ else ~}
+LAB_AD_JOIN_OK=0
 lab_log "ssm_aws_managed: waiting up to ${ad_ssm_join_wait_max_sec}s for AWS-JoinDirectoryServiceDomain (check SSM Fleet)"
 chronyc makestep 2>/dev/null || true
 JOIN_DEADLINE=$(($(date +%s) + ${ad_ssm_join_wait_max_sec}))
@@ -1337,6 +1341,7 @@ while [ "$(date +%s)" -lt "$${JOIN_DEADLINE}" ]; do
   fi
   sleep 15
 done
+LAB_AD_JOIN_OK="$${JOINED}"
 if [ "$${JOINED}" != "1" ]; then
   lab_log "WARN join not confirmed in window; verify SSM association AWS-JoinDirectoryServiceDomain (+ IAM LabSSMRole AmazonSSMDirectoryServiceAccess)"
 %{ if ad_fallback_adcli_after_ssm ~}
@@ -1378,6 +1383,7 @@ if [ "$${JOINED}" != "1" ]; then
         if printf '%s\n' "$${JOIN_PW_FB}" | adcli join -v '${ad_domain}' -U "$${ADCLI_SAM}" --stdin-password; then
           lab_log "ad_fallback_adcli: adcli join succeeded (attempt=$${FB_ATT}; CloudLabs Step 4.4)"
           JOINED=1
+          LAB_AD_JOIN_OK=1
           lab_write_sssd_conf_cloudlabs_doc
           break
         fi
@@ -1537,12 +1543,36 @@ sudo dcv close-session console 2>/dev/null || true
 
 systemctl enable sssd || true
 systemctl restart sssd || true
-lab_log "final sssd restart before READY tag"
+lab_log "final sssd restart before bootstrap status tag"
+
+LAB_BOOTSTRAP_TAG=FAILED
+%{ if enable_ad_join ~}
+if [ "$${LAB_AD_JOIN_OK:-0}" = "1" ]; then
+  LAB_BOOTSTRAP_TAG=READY
+elif command -v realm >/dev/null 2>&1 && realm list 2>/dev/null | grep -qi '${lower_ad_domain}'; then
+  LAB_BOOTSTRAP_TAG=READY
+  lab_log "bootstrap tag: AD join flag unset but realm list shows ${lower_ad_domain}"
+elif [ -f /etc/sssd/sssd.conf ] && grep -qE '^id_provider[[:space:]]*=[[:space:]]*ad' /etc/sssd/sssd.conf 2>/dev/null; then
+  LAB_BOOTSTRAP_TAG=READY
+  lab_log "bootstrap tag: sssd id_provider=ad (join assumed OK)"
+else
+  lab_log "ERROR bootstrap tag FAILED: AD not joined (see realm_userdata / SSM join logs above)"
+fi
+%{ else ~}
+LAB_BOOTSTRAP_TAG=READY
+lab_log "bootstrap tag: AD join disabled (enable_ad_join=false)"
+%{ endif ~}
 
 lab_aws ec2 create-tags \
   --region ${aws_region} \
   --resources "$${INSTANCE_ID}" \
-  --tags Key=LabBootstrap,Value=READY
+  --tags Key=LabBootstrap,Value="$${LAB_BOOTSTRAP_TAG}" || \
+  lab_log "WARN ec2 create-tags LabBootstrap=$${LAB_BOOTSTRAP_TAG} failed (broken awscli?)"
 
-lab_log "BOOTSTRAP COMPLETE — verify AD: getent passwd <user>; sssctl domain-status; DCV: ss -tlnp | grep 8443; log=$LOG"
-echo "========== BOOTSTRAP COMPLETE =========="
+if [ "$${LAB_BOOTSTRAP_TAG}" = "READY" ]; then
+  lab_log "BOOTSTRAP COMPLETE — verify AD: getent passwd <user>; sssctl domain-status; DCV: ss -tlnp | grep 8443; log=$LOG"
+  echo "========== BOOTSTRAP COMPLETE =========="
+else
+  lab_log "BOOTSTRAP FAILED — AD join required for learner DCV; log=$LOG"
+  echo "========== BOOTSTRAP FAILED (AD) =========="
+fi

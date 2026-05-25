@@ -85,7 +85,9 @@ resource "aws_instance" "CentOS8-AMD" {
   tags = {
     Name         = local.lab_instance_display_name
     map-migrated = "DADS45OSDL"
-    LabBootstrap = "READY"
+    # PENDING until user-data finishes AD/SSSD/DCV and runs ec2 create-tags LabBootstrap=READY.
+    # Do not set READY here — backend would start DCV before cloud-init completes.
+    LabBootstrap = "PENDING"
   }
 }
 
