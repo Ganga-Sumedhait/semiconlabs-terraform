@@ -282,7 +282,7 @@ variable "ad_sssd_default_shell" {
 # EFS NFS host (DNS only, no ":/" suffix). User-data mounts nfs4 host:/ once to /efs (EFS does not export subpaths as separate NFS roots).
 variable "lab_efs_nfs_host" {
   type        = string
-  default     = ""
+  default     = "fs-0985e64c096c42f09.efs.ap-south-1.amazonaws.com"
   description = "EFS filesystem DNS name for lab mounts (same region as instance). Empty string skips all EFS logic in user-data."
 }
 
@@ -309,7 +309,7 @@ variable "lab_efs_aws_ip_fallback" {
 # Set via Terraform tfvars or backend env LAB_EFS_MOUNT_TARGET_IP at apply time.
 variable "lab_efs_mount_target_ip" {
   type        = string
-  default     = ""
+  default     = "10.10.3.41"
   description = "EFS mount-target IPv4 for fstab + nfs4 mount when VPC DNS/API fallback fail. Override per env or set LAB_EFS_MOUNT_TARGET_IP in backend. Empty skips static IP path."
 }
 
