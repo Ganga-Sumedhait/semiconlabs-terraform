@@ -466,6 +466,139 @@ else
   lab_log "WARN tcsh not installed — install tcsh package for learner terminals"
 fi
 
+# Standalone post-OS disk expansion script and systemd service
+cat >/usr/local/sbin/lab-disk-expand.sh <<'LABDISKEXPAND'
+#!/bin/bash
+# post‑OS disk expansion – idempotent
+set -uo pipefail
+LOG=/var/log/lab-bootstrap.log
+echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [lab-disk-expand] starting post‑OS disk expansion..." | tee -a "$LOG"
+if command -v dnf >/dev/null 2>&1; then
+  dnf install -y cloud-utils-growpart 2>&1 | tee -a "$LOG" || true
+fi
+if command -v growpart >/dev/null 2>&1; then
+  growpart /dev/nvme0n1 2 2>&1 | tee -a "$LOG" || true
+fi
+if command -v pvresize >/dev/null 2>&1; then
+  pvresize /dev/nvme0n1p2 2>&1 | tee -a "$LOG" || true
+fi
+if command -v lvextend >/dev/null 2>&1; then
+  lvextend -r -l +100%FREE /dev/cl/root 2>&1 | tee -a "$LOG" || true
+fi
+echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [lab-disk-expand] disk expansion complete." | tee -a "$LOG"
+LABDISKEXPAND
+chmod +x /usr/local/sbin/lab-disk-expand.sh
+
+cat >/etc/systemd/system/lab-disk-expand.service <<'LABDISKEXPANDSVC'
+[Unit]
+Description=Idempotent post-OS disk expansion
+After=local-fs.target
+Before=cloud-init-local.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lab-disk-expand.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+LABDISKEXPANDSVC
+
+systemctl daemon-reload || true
+systemctl enable lab-disk-expand.service 2>/dev/null || true
+/usr/local/sbin/lab-disk-expand.sh || true
+
+# Always install tcsh/csh login profile handoff and csh system env hooks
+cat >/etc/profile.d/zz-lab-efs-tools.sh <<'ZZLABEFS'
+# Lab PD/AL/DV vendor env: pdsource, alsource, dvsource are tcsh/csh (setenv, set path = (...)).
+# Never `.` them in bash — use zz-lab-efs-tools.csh or login tcsh instead.
+lab_efs_tools_profile_sh() {
+  command -v tcsh >/dev/null 2>&1 || return 0
+  [ -n "$${PS1:-}" ] || return 0
+  [ -n "$${LAB_EFS_TCSH_ACTIVE:-}" ] && return 0
+  case "$$(whoami)" in
+    root|centos|ec2-user|ssm-user|cloud-user|ubuntu|admin) return 0 ;;
+  esac
+  case "$$(ps -o comm= -p $$ 2>/dev/null | tr -d ' \n')" in
+    bash|sh|dash) ;;
+    *) return 0 ;;
+  esac
+  LAB_EFS_TCSH_ACTIVE=1
+  export LAB_EFS_TCSH_ACTIVE
+  exec /bin/tcsh -l
+}
+lab_efs_tools_profile_sh
+ZZLABEFS
+chmod 644 /etc/profile.d/zz-lab-efs-tools.sh 2>/dev/null || true
+
+cat >/etc/profile.d/zz-lab-efs-tools.csh <<'ZZLABEFSCSH'
+# Lab domain vendor env for tcsh/csh (DCV learner shells; Cadence/Synopsys pdsource etc.).
+set _orig_dir = "$cwd"
+if ( -r /etc/lab/efs-tool-sources.lst ) then
+foreach f (`grep -v '^[[:space:]]*#' /etc/lab/efs-tool-sources.lst | grep -v '^[[:space:]]*$'`)
+  if ( -f "$f" ) then
+    switch ($f)
+    case /PD/pdsource:
+    case /efs/tools/PD/pdsource:
+    case /PD/snps/pdsource:
+    case /PD/cdn/pdsource:
+    case /PD/cdn/cdnsource:
+    case /efs/tools/PD/snps/pdsource:
+    case /efs/tools/PD/cdn/pdsource:
+      cd /PD
+      breaksw
+    case /AL/alsource:
+    case /efs/tools/AL/alsource:
+    case /AL/cdn/alsource:
+    case /efs/tools/AL/cdn/alsource:
+      cd /AL
+      breaksw
+    case /DV/dvsource:
+    case /efs/tools/DV/dvsource:
+    case /DV/snps/dvsource:
+    case /DV/cdn/dvsource:
+      cd /DV
+      breaksw
+    endsw
+    source "$f"
+  endif
+end
+# pdsource sets ICC2_HOME under /efs/tools/PD/... — prefer /PD/... bind mount (do not use $?ICC2_HOME: tcsh treats $? as exit status).
+if ( "$ICC2_HOME" != "" ) then
+  set _iccfix = `echo "$ICC2_HOME" | sed \
+    -e 's|^/efs/tools/PD|/PD|' \
+    -e 's|^/efs/tools/AL|/AL|' \
+    -e 's|^/efs/tools/DV|/DV|'`
+  if ( -d "$_iccfix" ) setenv ICC2_HOME "$_iccfix"
+  if ( -d "$ICC2_HOME/linux64/bin" ) then
+    set path = ( "$ICC2_HOME/linux64/bin" $path )
+  else if ( -d "$ICC2_HOME/bin" ) then
+    set path = ( "$ICC2_HOME/bin" $path )
+  endif
+endif
+endif
+cd "$_orig_dir"
+ZZLABEFSCSH
+chmod 644 /etc/profile.d/zz-lab-efs-tools.csh 2>/dev/null || true
+
+for skel_rc in .tcshrc .cshrc; do
+  if [ ! -f /etc/skel/$skel_rc ] || ! grep -qF 'semiconlabs-lab-efs-tool-env' /etc/skel/$skel_rc 2>/dev/null; then
+    {
+      echo '# semiconlabs-lab-efs-tool-env'
+      echo 'if ( -r /etc/profile.d/zz-lab-efs-tools.csh ) source /etc/profile.d/zz-lab-efs-tools.csh'
+    } >>/etc/skel/$skel_rc
+  fi
+  chmod 644 /etc/skel/$skel_rc 2>/dev/null || true
+done
+if [ -f /etc/csh.cshrc ] && ! grep -qF 'semiconlabs-lab-efs-tool-env' /etc/csh.cshrc 2>/dev/null; then
+  {
+    echo ''
+    echo '# semiconlabs-lab-efs-tool-env'
+    echo 'if ( -r /etc/profile.d/zz-lab-efs-tools.csh ) source /etc/profile.d/zz-lab-efs-tools.csh'
+  } >>/etc/csh.cshrc
+fi
+lab_log "installed SSSD/tcsh shell handoff profiles unconditionally"
+
 # EFS: runtime nfs4 mount only (IT: no vi /etc/fstab line for 10.x:/ /efs). lab-efs-mount.service
 # mounts server:/tools/PD → /PD (etc.) after network-online; lab-efs-tool-env.sh sources pdsource/….
 %{ if trimspace(lab_efs_nfs_host) != "" ~}
@@ -972,92 +1105,6 @@ if [ ! -s /etc/lab/efs-tool-sources.lst ]; then
   lab_te_log "no tool source paths (TOOLS_LIST empty?)"
   exit 0
 fi
-cat >/etc/profile.d/zz-lab-efs-tools.sh <<'ZZLABEFS'
-# Lab PD/AL/DV vendor env: pdsource, alsource, dvsource are tcsh/csh (setenv, set path = (...)).
-# Never `.` them in bash — use zz-lab-efs-tools.csh or login tcsh instead.
-lab_efs_tools_profile_sh() {
-  [ -r /etc/lab/efs-tool-sources.lst ] || return 0
-  command -v tcsh >/dev/null 2>&1 || return 0
-  [ -n "$${PS1:-}" ] || return 0
-  [ -n "$${LAB_EFS_TCSH_ACTIVE:-}" ] && return 0
-  case "$$(ps -o comm= -p $$ 2>/dev/null | tr -d ' \n')" in
-    bash|sh|dash) ;;
-    *) return 0 ;;
-  esac
-  LAB_EFS_TCSH_ACTIVE=1
-  export LAB_EFS_TCSH_ACTIVE
-  exec /bin/tcsh -l
-}
-lab_efs_tools_profile_sh
-ZZLABEFS
-chmod 644 /etc/profile.d/zz-lab-efs-tools.sh 2>/dev/null || true
-cat >/etc/profile.d/zz-lab-efs-tools.csh <<'ZZLABEFSCSH'
-# Lab domain vendor env for tcsh/csh (DCV learner shells; Cadence/Synopsys pdsource etc.).
-set _orig_dir = "$cwd"
-if ( -r /etc/lab/efs-tool-sources.lst ) then
-foreach f (`grep -v '^[[:space:]]*#' /etc/lab/efs-tool-sources.lst | grep -v '^[[:space:]]*$'`)
-  if ( -f "$f" ) then
-    switch ($f)
-    case /PD/pdsource:
-    case /efs/tools/PD/pdsource:
-    case /PD/snps/pdsource:
-    case /PD/cdn/pdsource:
-    case /PD/cdn/cdnsource:
-    case /efs/tools/PD/snps/pdsource:
-    case /efs/tools/PD/cdn/pdsource:
-      cd /PD
-      breaksw
-    case /AL/alsource:
-    case /efs/tools/AL/alsource:
-    case /AL/cdn/alsource:
-    case /efs/tools/AL/cdn/alsource:
-      cd /AL
-      breaksw
-    case /DV/dvsource:
-    case /efs/tools/DV/dvsource:
-    case /DV/snps/dvsource:
-    case /DV/cdn/dvsource:
-      cd /DV
-      breaksw
-    endsw
-    source "$f"
-  endif
-end
-# pdsource sets ICC2_HOME under /efs/tools/PD/... — prefer /PD/... bind mount (do not use $?ICC2_HOME: tcsh treats $? as exit status).
-if ( "$ICC2_HOME" != "" ) then
-  set _iccfix = `echo "$ICC2_HOME" | sed \
-    -e 's|^/efs/tools/PD|/PD|' \
-    -e 's|^/efs/tools/AL|/AL|' \
-    -e 's|^/efs/tools/DV|/DV|'`
-  if ( -d "$_iccfix" ) setenv ICC2_HOME "$_iccfix"
-  if ( -d "$ICC2_HOME/linux64/bin" ) then
-    set path = ( "$ICC2_HOME/linux64/bin" $path )
-  else if ( -d "$ICC2_HOME/bin" ) then
-    set path = ( "$ICC2_HOME/bin" $path )
-  endif
-endif
-endif
-cd "$_orig_dir"
-ZZLABEFSCSH
-chmod 644 /etc/profile.d/zz-lab-efs-tools.csh 2>/dev/null || true
-for skel_rc in .tcshrc .cshrc; do
-  if [ ! -f /etc/skel/$skel_rc ] || ! grep -qF 'semiconlabs-lab-efs-tool-env' /etc/skel/$skel_rc 2>/dev/null; then
-    {
-      echo '# semiconlabs-lab-efs-tool-env'
-      echo 'if ( -r /etc/profile.d/zz-lab-efs-tools.csh ) source /etc/profile.d/zz-lab-efs-tools.csh'
-    } >>/etc/skel/$skel_rc
-  fi
-  chmod 644 /etc/skel/$skel_rc 2>/dev/null || true
-done
-if [ -f /etc/csh.cshrc ] && ! grep -qF 'semiconlabs-lab-efs-tool-env' /etc/csh.cshrc 2>/dev/null; then
-  {
-    echo ''
-    echo '# semiconlabs-lab-efs-tool-env'
-    echo 'if ( -r /etc/profile.d/zz-lab-efs-tools.csh ) source /etc/profile.d/zz-lab-efs-tools.csh'
-  } >>/etc/csh.cshrc
-fi
-lab_te_log "installed profile.d zz-lab-efs-tools.csh + bash->tcsh handoff (.sh); skel + csh.cshrc ($(wc -l </etc/lab/efs-tool-sources.lst) source path(s))"
-exit 0
 LABEFSTOOLENV
 chmod +x /usr/local/sbin/lab-efs-tool-env.sh
 
