@@ -18,7 +18,14 @@ log() { echo "$LOG_TAG $*"; }
 
 if [ -f "$MARKER" ]; then
   log "already applied v3 ($(cat "$MARKER" 2>/dev/null || echo ok))"
-  exit 0
+  POLICY_OK=0
+  if [ -f /etc/dcv/dcv.conf ] && grep -q 'same-user-oldest-connection' /etc/dcv/dcv.conf 2>/dev/null; then
+    POLICY_OK=1
+  fi
+  if [ "$POLICY_OK" -eq 1 ]; then
+    exit 0
+  fi
+  log "marker present but eviction policy missing/wrong — re-applying policy"
 fi
 
 if [ -f /etc/dcv/dcv.conf ]; then
