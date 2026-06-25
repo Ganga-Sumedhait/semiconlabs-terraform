@@ -16,7 +16,7 @@ INSTANCE_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
   "http://169.254.169.254/latest/meta-data/instance-id" || hostname)
 lab_log "bootstrap start instance=$INSTANCE_ID ad=${enable_ad_join}/${ad_join_mechanism}"
 
-# AMI ships ~8G LVM root on 30–40G EBS — expand before any writes or AD join (keytab needs /tmp).
+# AMI ships ~8G LVM root on 30-40G EBS - expand before any writes or AD join (keytab needs /tmp).
 lab_log "inline root disk expand (AMI ships ~8G root on larger EBS)"
 if [ -b /dev/nvme0n1p2 ]; then
   command -v growpart >/dev/null 2>&1 && growpart /dev/nvme0n1 2 2>&1 || true
@@ -111,7 +111,7 @@ systemctl enable sshd
 systemctl restart sshd
 
 %{ if trimspace(lab_ssh_public_key_b64) != "" ~}
-# Optional: embed lab SSH pubkey in user-data (disabled by default — exceeds EC2 16 KiB gzip budget).
+# Optional: embed lab SSH pubkey in user-data (disabled by default - exceeds EC2 16 KiB gzip budget).
 # Backend injects the same key via SSM after the instance is up.
 lab_log "install lab SSH pubkey from Terraform (base64 payload; no aws_key_pair)"
 LAB_B64='${lab_ssh_public_key_b64}'
@@ -188,7 +188,7 @@ systemctl enable lab-ssh-key-bootstrap.service 2>/dev/null || true
 lab_log "lab SSH pubkey: skipped (backend SSM inject)"
 %{ endif ~}
 
-# Golden AMI: dnf/rpm SIGBUS on corrupt Berkeley DB; binaries are pre-baked — never dnf at boot.
+# Golden AMI: dnf/rpm SIGBUS on corrupt Berkeley DB; binaries are pre-baked - never dnf at boot.
 lab_log "early packages: binary check only (no dnf/rpm at boot)"
 EARLY_MISSING=""
 for b in realm adcli oddjobd sssd tcsh csh curl unzip aws; do
@@ -204,10 +204,10 @@ fi
 
 cat >/usr/local/sbin/lab-disk-expand.sh <<'LABDISKEXPAND'
 #!/bin/bash
-# post‑OS disk expansion – idempotent
+# post-OS disk expansion - idempotent
 set -uo pipefail
 LOG=/var/log/lab-bootstrap.log
-echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [lab-disk-expand] starting post‑OS disk expansion..." | tee -a "$LOG"
+echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [lab-disk-expand] starting post-OS disk expansion..." | tee -a "$LOG"
 if command -v growpart >/dev/null 2>&1; then
   growpart /dev/nvme0n1 2 2>&1 | tee -a "$LOG" || true
 fi
@@ -243,7 +243,7 @@ systemctl enable lab-disk-expand.service 2>/dev/null || true
 # Always install tcsh/csh login profile handoff and csh system env hooks
 cat >/etc/profile.d/zz-lab-efs-tools.sh <<'ZZLABEFS'
 # Lab PD/AL/DV vendor env: pdsource, alsource, dvsource are tcsh/csh (setenv, set path = (...)).
-# Never `.` them in bash — use zz-lab-efs-tools.csh or login tcsh instead.
+# Never `.` them in bash - use zz-lab-efs-tools.csh or login tcsh instead.
 lab_efs_tools_profile_sh() {
   command -v tcsh >/dev/null 2>&1 || return 0
   [ -n "$${PS1:-}" ] || return 0
@@ -295,7 +295,7 @@ foreach f (`grep -v '^[[:space:]]*#' /etc/lab/efs-tool-sources.lst | grep -v '^[
     source "$f"
   endif
 end
-# pdsource sets ICC2_HOME under /efs/tools/PD/... — prefer /PD/... bind mount (do not use $?ICC2_HOME: tcsh treats $? as exit status).
+# pdsource sets ICC2_HOME under /efs/tools/PD/... - prefer /PD/... bind mount (do not use $?ICC2_HOME: tcsh treats $? as exit status).
 if ( "$ICC2_HOME" != "" ) then
   set _iccfix = `echo "$ICC2_HOME" | sed \
     -e 's|^/efs/tools/PD|/PD|' \
@@ -332,9 +332,9 @@ fi
 lab_log "installed tcsh/efs shell profiles"
 
 # EFS: runtime nfs4 mount only (IT: no vi /etc/fstab line for 10.x:/ /efs). lab-efs-mount.service
-# mounts server:/tools/PD → /PD (etc.) after network-online; lab-efs-tool-env.sh sources pdsource/….
+# mounts server:/tools/PD -> /PD (etc.) after network-online; lab-efs-tool-env.sh sources pdsource/....
 %{ if trimspace(lab_efs_nfs_host) != "" ~}
-# Golden AMI often ships /tools as a regular file — blocks nfs4 mount of EFS :/tools.
+# Golden AMI often ships /tools as a regular file - blocks nfs4 mount of EFS :/tools.
 if [ -e /tools ] && [ ! -d /tools ]; then
   lab_log "AMI: /tools is not a directory ($(file -b /tools 2>/dev/null || echo unknown)); moving aside for EFS"
   mv /tools /tools.ami-file.bak 2>/dev/null || rm -f /tools 2>/dev/null || true
@@ -533,7 +533,7 @@ lab_efs_mount_efs_root_for_cad2k() {
   lab_efs_log "WARN mount $${server}:/ -> /efs failed (cad2k symlinks in pdsource may fail)"
   return 1
 }
-# pdsource uses ICC2_HOME=/efs/tools/<PD|AL|DV>/... — symlink when /efs is not nfs-mounted.
+# pdsource uses ICC2_HOME=/efs/tools/<PD|AL|DV>/... - symlink when /efs is not nfs-mounted.
 lab_efs_ensure_legacy_efs_paths() {
   local c
   lab_efs_prepare_mount_point /efs || return 0
@@ -630,7 +630,7 @@ lab_efs_run_mount_pass() {
   lab_efs_bind_tools || return 1
   lab_efs_verify_required_mounts
 }
-# IT pattern: after binds (or direct subpath mounts), drop /efs so learners browse /PD only — not via fstab.
+# IT pattern: after binds (or direct subpath mounts), drop /efs so learners browse /PD only - not via fstab.
 lab_efs_hide_efs_root() {
   [ -n "$(echo $TOOLS_LIST | tr -d '[:space:]')" ] || return 0
   chmod 700 /efs 2>/dev/null || true
@@ -638,7 +638,7 @@ lab_efs_hide_efs_root() {
     if umount /efs 2>&1 | tee -a "$LOG"; then
       lab_efs_log "umount /efs OK (learners use /PD|/DV|/AL only; /efs not listed)"
     else
-      lab_efs_log "WARN umount /efs failed — /efs may stay mounted; tightened mode 700 on /efs"
+      lab_efs_log "WARN umount /efs failed - /efs may stay mounted; tightened mode 700 on /efs"
     fi
   fi
 }
@@ -660,7 +660,7 @@ lab_efs_bind_tools() {
       /usr/local/sbin/lab-efs-tool-env.sh 2>/dev/null || true
       return 0
     fi
-    lab_efs_log "direct subpath: ok=$ok fail=$fail — falling back to /efs root + bind"
+    lab_efs_log "direct subpath: ok=$ok fail=$fail - falling back to /efs root + bind"
   fi
   if ! lab_efs_nfs_mounted; then
     return 1
@@ -691,7 +691,7 @@ while [ "$_pass" -le "$_max_pass" ]; do
   sleep 20
   _pass=$((_pass + 1))
 done
-lab_efs_log "FAIL EFS mounts after $_max_pass attempts — check network, SG 2049, mount target"
+lab_efs_log "FAIL EFS mounts after $_max_pass attempts - check network, SG 2049, mount target"
 exit 1
 LABEFSMOUNT
 chmod +x /usr/local/sbin/lab-efs-mount.sh
@@ -794,7 +794,7 @@ chmod +x /usr/local/sbin/lab-efs-tool-env.sh
 
 cat >/etc/systemd/system/lab-efs-mount.service <<'LABEFSSVC'
 [Unit]
-Description=Lab EFS nfs4 root and tool bind mounts (/efs, /PD, …)
+Description=Lab EFS nfs4 root and tool bind mounts (/efs, /PD, ...)
 After=network-online.target
 Wants=network-online.target
 Before=remote-fs.target
@@ -826,7 +826,7 @@ chmod 644 /etc/cron.d/semiconlabs-lab-efs-mount 2>/dev/null || true
 systemctl daemon-reload || true
 systemctl enable lab-efs-mount.service 2>/dev/null || true
 lab_log "EFS: enabled lab-efs-mount.service + @reboot cron (no fstab; remount every boot)"
-# Do not block AD join on NFS: sync mount was 6×90s timeouts (~15 min) before LabBootstrap=READY.
+# Do not block AD join on NFS: sync mount was 6x90s timeouts (~15 min) before LabBootstrap=READY.
 lab_log "EFS: starting lab-efs-mount.service in background (AD join is critical path)"
 systemctl start lab-efs-mount.service 2>/dev/null &
 %{ else ~}
@@ -844,7 +844,7 @@ if [[ "$LAB_SSSD_SH" == *tcsh* ]]; then
 fi
 export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:$PATH"
 
-# AWS CLI v2 — use lab_aws() for all CLI calls (prefers /usr/local/bin/aws after successful zip install).
+# AWS CLI v2 - use lab_aws() for all CLI calls (prefers /usr/local/bin/aws after successful zip install).
 lab_ensure_awscli_v2 || true
 if [ -x /usr/local/bin/aws ]; then
   export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
@@ -860,7 +860,7 @@ lab_aws() {
   fi
 }
 # Terraform: use a single `$` before `(` for bash $(...). Writing `$$` before `(` can leave
-# literal `$$` in rendered user_data → bash treats `$$` as PID and errors near `(`.
+# literal `$$` in rendered user_data -> bash treats `$$` as PID and errors near `(`.
 LAB_AWS_BOOT_LINE=$(lab_aws --version 2>&1 | head -1) || LAB_AWS_BOOT_LINE='(lab_aws failed)'
 lab_log "bootstrap aws: $LAB_AWS_BOOT_LINE"
 
@@ -920,7 +920,7 @@ SSSDCLOUDLABS
 }
 
 %{ if ad_join_mechanism == "ssm_aws_managed" ~}
-# JoinDirectoryServiceDomain only runs via SSM once the managed instance reports Online — ensure agent is up early.
+# JoinDirectoryServiceDomain only runs via SSM once the managed instance reports Online - ensure agent is up early.
 lab_log "ssm_aws_managed: enable/restart amazon-ssm-agent (required before directory join document)"
 systemctl enable amazon-ssm-agent.service 2>/dev/null || systemctl enable amazon-ssm-agent 2>/dev/null || true
 systemctl restart amazon-ssm-agent 2>/dev/null || lab_log "WARN could not restart amazon-ssm-agent (non-fatal)"
@@ -928,7 +928,7 @@ systemctl restart amazon-ssm-agent 2>/dev/null || lab_log "WARN could not restar
 # IMPORTANT: we do NOT call `aws ssm describe-instance-information` here.
 # That API requires `ssm:DescribeInstanceInformation`, which is NOT in
 # `AmazonSSMManagedInstanceCore`. With the default instance role the call
-# returns AccessDenied → silently empty PingStatus → false 300/900s timeout.
+# returns AccessDenied -> silently empty PingStatus -> false 300/900s timeout.
 # A LOCAL health check is exactly as good: once the agent is active and has
 # successfully exchanged credentials with AWS, the managed instance will be
 # reported Online to Fleet Manager and the association will deliver.
@@ -936,7 +936,7 @@ lab_log "ssm_aws_managed: wait for amazon-ssm-agent local readiness (no AWS API 
 SSM_ONLINE_DEADLINE=$(( $(date +%s) + 300 ))
 SSM_SEEN_GOOD=""
 # Readiness signals that work for EC2 instance-role identity (no
-# /var/lib/amazon/ssm/Vault/Store/RegistrationKey — that file is only
+# /var/lib/amazon/ssm/Vault/Store/RegistrationKey - that file is only
 # created for on-prem / hybrid activation).
 #
 # IMPORTANT: this script runs with `set -uo pipefail`. Any pipe stage
@@ -944,7 +944,7 @@ SSM_SEEN_GOOD=""
 # poisons the pipeline's exit code, so an earlier "{ journalctl; tail; }
 # | grep -q" version of this function silently returned 1 every time
 # when /var/log/amazon/ssm/amazon-ssm-agent.log hadn't been written
-# yet — even though the agent was perfectly healthy and journald had
+# yet - even though the agent was perfectly healthy and journald had
 # `Credentials ready`. We test each source INDEPENDENTLY now, and try
 # several known log-file paths (location varies across agent versions
 # and AMIs).
@@ -969,16 +969,16 @@ if [ "$SSM_SEEN_GOOD" = "yes" ]; then
   # IMPORTANT: Terraform creates `aws_ssm_association` only AFTER
   # `time_sleep.wait_ssm_registration_after_ec2` (same duration as this var).
   # A short sleep here made user-data poll for realm while NO association existed
-  # yet (~2 minute blind window vs 180s TF delay → empty realm_list on lab 137).
+  # yet (~2 minute blind window vs 180s TF delay -> empty realm_list on lab 137).
   lab_log "ssm_aws_managed: agent locally healthy; settling ${ad_ssm_association_delay} (matches Terraform association delay, then polling for join)"
   sleep ${ad_ssm_association_delay}
 else
-  lab_log "WARN ssm_aws_managed: agent local readiness markers not seen in 300s — proceeding (State Manager may still deliver join document)"
+  lab_log "WARN ssm_aws_managed: agent local readiness markers not seen in 300s - proceeding (State Manager may still deliver join document)"
 fi
 %{ endif ~}
 
 # Ensure cloud / DCV users can run lab admin commands (sudo dcv create-session,
-# adcli, sssd restart) WITHOUT a TTY — golden AMIs don't always ship a
+# adcli, sssd restart) WITHOUT a TTY - golden AMIs don't always ship a
 # NOPASSWD sudoers drop-in, and `ssh ... centos@host "sudo dcv ..."` runs
 # without a controlling terminal so it fails with "sudo: a terminal is required
 # to read the password". Idempotent.
@@ -1005,7 +1005,7 @@ LAB_SUDO_EOF
   chmod 0440 /etc/sudoers.d/95-lab-cloud-users
   lab_log "installed /etc/sudoers.d/95-lab-cloud-users (NOPASSWD for cloud/DCV users)"
 fi
-# Older labs: file exists without ssm-user — append so DCV over SSH as ssm-user matches centos.
+# Older labs: file exists without ssm-user - append so DCV over SSH as ssm-user matches centos.
 if [ -f /etc/sudoers.d/95-lab-cloud-users ] && ! grep -qE '^ssm-user[[:space:]]' /etc/sudoers.d/95-lab-cloud-users 2>/dev/null; then
   printf '\n# Lab append: DCV/SSM over non-interactive SSH\nDefaults:ssm-user !requiretty\nssm-user ALL=(ALL) NOPASSWD: ALL\n' >>/etc/sudoers.d/95-lab-cloud-users
   chmod 0440 /etc/sudoers.d/95-lab-cloud-users
@@ -1100,7 +1100,7 @@ else
   ADCLI_SAM_J='${ad_join_user}'
   case "$${ADCLI_SAM_J}" in *@*) ADCLI_SAM_J="$${ADCLI_SAM_J%%@*}";; esac
 
-  # Step 4.4 — Join the Domain (guide uses: echo 'PASSWORD' | sudo adcli join ... ; we use printf for safe newlines).
+  # Step 4.4 - Join the Domain (guide uses: echo 'PASSWORD' | sudo adcli join ... ; we use printf for safe newlines).
   do_adcli_join_cloudlabs_doc() {
     chronyc makestep 2>/dev/null || true
 %{ if ad_computer_ou != "" ~}
@@ -1191,7 +1191,7 @@ if [ "$${JOINED}" != "1" ]; then
           lab_write_sssd_conf_cloudlabs_doc
           break
         fi
-        lab_log "WARN ad_fallback_adcli: adcli join attempt $${FB_ATT} failed — retry in 60s"
+        lab_log "WARN ad_fallback_adcli: adcli join attempt $${FB_ATT} failed - retry in 60s"
         FB_ATT=$((FB_ATT + 1))
         sleep 60
       done
@@ -1271,7 +1271,6 @@ systemctl reset-failed dcvserver 2>/dev/null || true
 # Virtual sessions created by backend; do not auto-create at boot.
 cat >/etc/dcv/dcv.conf <<'DCVBASE'
 [server]
-client-eviction-policy = "same-user-oldest-connection"
 
 [security]
 authentication="system"
@@ -1282,6 +1281,17 @@ create-session = false
 # Virtual sessions default to dcv-gl "default-on", which requires a DCV-GL license; without it the
 # X session often exits immediately and list-sessions stays empty after create-session returns 0.
 enable-gl-in-virtual-sessions = always-off
+# Newest browser wins. max-concurrent-clients (1 client per session) belongs in
+# [session-management]; client-eviction-policy belongs in the
+# [session-management/automatic-console-session] subsection (NOT [server] or
+# [connectivity], where DCV silently ignores it and defaults to reject). When the
+# 1-client limit is hit, DCV closes the same user's OLDEST connection instead of
+# rejecting the new one. Requires DCV >= 2022.1-13067.
+max-concurrent-clients = 1
+
+[session-management/automatic-console-session]
+client-eviction-policy = "same-user-oldest-connection"
+max-concurrent-clients = 1
 
 [display]
 max-num-heads=1
@@ -1302,14 +1312,14 @@ enable-quic-frontend=false
 idle-timeout=0
 EOF
 
-# Block DCV client ↔ VM clipboard only; in-session copy/paste inside the desktop still works.
+# Block DCV client ? VM clipboard only; in-session copy/paste inside the desktop still works.
 cat >/etc/dcv/default.perm <<'DCVPERM'
 [permissions]
 %any% deny clipboard-copy clipboard-paste
 DCVPERM
 chmod 644 /etc/dcv/default.perm 2>/dev/null || true
 if grep -q 'ipv6.disable=1' /proc/cmdline 2>/dev/null; then
-  lab_log "ERROR_LAB_KERN_IPV6_OFF: ipv6.disable=1 in cmdline — fix grub and rebake AMI"
+  lab_log "ERROR_LAB_KERN_IPV6_OFF: ipv6.disable=1 in cmdline - fix grub and rebake AMI"
 else
   modprobe ipv6 2>/dev/null || true
   if [ -d /proc/sys/net/ipv6 ]; then
@@ -1323,19 +1333,14 @@ systemctl unmask dcvserver 2>/dev/null || true
 systemctl enable dcvserver || true
 systemctl reset-failed dcvserver 2>/dev/null || true
 
-# DCV www UX v5: same-user-oldest (prod-style paste-URL takeover) + stale-tab reconnect guard.
-DUP_MSG='You already have an active lab session in another browser tab or window. Please log out from that session first, then try again here.'
+# DCV www UX v8: zombie-connecting guard + same-user-oldest (lab-dcv-guard.script.ts).
 if [ -d /usr/share/dcv/www ]; then
-  find /usr/share/dcv/www -type f \( -name '*.js' -o -name '*.html' -o -name '*.json' \) \
-    -exec sed -i "s|Maximum number of clients reached\.|$${DUP_MSG}|g" {} + 2>/dev/null || true
-  find /usr/share/dcv/www -type f \( -name '*.js' -o -name '*.html' -o -name '*.json' \) \
-    -exec sed -i "s|Maximum number of clients reached|$${DUP_MSG}|g" {} + 2>/dev/null || true
   cat >/usr/share/dcv/www/custom-popup.js <<'DCVPOP'
 if(!window.__lab_stop_hint_shown){window.__lab_stop_hint_shown=1;try{var n=parseInt(localStorage.getItem("lab_warn_count")||"0",10);if(n<3){localStorage.setItem("lab_warn_count",String(n+1));alert("Important: Closing this browser tab does NOT stop your lab session. It keeps running in the background. When you are done, click Stop Lab on the main portal.");}}catch(e){}}
 DCVPOP
   chmod 644 /usr/share/dcv/www/custom-popup.js || true
   cat >/usr/share/dcv/www/lab-stale-tab-guard.js <<'LABGUARD'
-(function(){var blocked=false,hadOpen=false;var O=window.WebSocket;function W(u,p){if(blocked){throw new Error("lab stale tab");}var s=new O(u,p);s.addEventListener("open",function(){hadOpen=true;});s.addEventListener("close",function(){if(hadOpen){blocked=true;}});return s;}W.prototype=O.prototype;W.CONNECTING=O.CONNECTING;W.OPEN=O.OPEN;W.CLOSING=O.CLOSING;W.CLOSED=O.CLOSED;window.WebSocket=W;})();
+(function(){var REV='v9',blocked=false,tabId=Math.random().toString(36).slice(2),tabTs=Date.now();var LK='lab_dcv_tab_leader',activeWs=null;function demote(){if(blocked)return;blocked=true;try{sessionStorage.setItem('lab_dcv_blocked','1');}catch(e){}if(activeWs){try{activeWs.close();}catch(x){}activeWs=null;}}try{if(sessionStorage.getItem('lab_dcv_blocked')==='1')blocked=true;}catch(e){}function claim(){try{localStorage.setItem(LK,JSON.stringify({id:tabId,ts:tabTs,rev:REV}));}catch(e){}}try{claim();window.addEventListener('storage',function(e){if(e.key!==LK||!e.newValue)return;try{var n=JSON.parse(e.newValue);if(n.id!==tabId&&n.ts>tabTs)demote();}catch(x){}});setInterval(function(){try{var L=JSON.parse(localStorage.getItem(LK)||'{}');if(L.id&&L.id!==tabId&&L.ts>tabTs)demote();}catch(x){}},2000);}catch(e){}var O=window.WebSocket;function W(u,p){if(blocked)throw new Error('lab stale tab');var s=new O(u,p);activeWs=s;s.addEventListener('open',function(){claim();});return s;}W.prototype=O.prototype;W.CONNECTING=O.CONNECTING;W.OPEN=O.OPEN;W.CLOSING=O.CLOSING;W.CLOSED=O.CLOSED;window.WebSocket=W;function hideReconnect(){if(!blocked)return;document.querySelectorAll('button,a,[role=button]').forEach(function(el){var t=(el.textContent||'').toLowerCase();if(t.indexOf('reconnect')>=0||t.indexOf('connect again')>=0){el.style.pointerEvents='none';el.style.opacity='0.35';}});}var mo=new MutationObserver(hideReconnect);function startObs(){if(document.body)mo.observe(document.body,{childList:true,subtree:true});hideReconnect();}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',startObs);else startObs();})();
 LABGUARD
   chmod 644 /usr/share/dcv/www/lab-stale-tab-guard.js || true
   if [ -f /usr/share/dcv/www/index.html ]; then
@@ -1346,11 +1351,12 @@ LABGUARD
       sed -i 's|</head>|<script src="lab-stale-tab-guard.js"></script></head>|' /usr/share/dcv/www/index.html 2>/dev/null || true
     fi
   fi
-  lab_log "DCV www UX v5 applied (same-user-oldest + stale-tab guard)"
+  lab_log "DCV www UX v8 applied (same-user-oldest + zombie-connecting guard)"
 fi
 install -d /etc/lab
-rm -f /etc/lab/dcv-www-ux-v1.done /etc/lab/dcv-www-ux-v2.done /etc/lab/dcv-www-ux-v3.done /etc/lab/dcv-www-ux-v4.done 2>/dev/null || true
-date -u +%Y-%m-%dT%H:%M:%SZ >/etc/lab/dcv-www-ux-v5.done
+echo v9 >/etc/lab/dcv-guard-rev
+rm -f /etc/lab/dcv-www-ux-v1.done /etc/lab/dcv-www-ux-v2.done /etc/lab/dcv-www-ux-v3.done /etc/lab/dcv-www-ux-v4.done /etc/lab/dcv-www-ux-v5.done 2>/dev/null || true
+date -u +%Y-%m-%dT%H:%M:%SZ >/etc/lab/dcv-www-ux-v6.done
 
 systemctl restart dcvserver || true
 sudo dcv close-session console 2>/dev/null || true

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Full lab bootstrap (rendered at terraform apply → S3 → executed by user-data-stub).
-# No EC2 16 KiB limit — add new bootstrap logic here, not in user-data-stub.sh.tftpl.
+# Full lab bootstrap (rendered at terraform apply -> S3 -> executed by user-data-stub).
+# No EC2 16 KiB limit - add new bootstrap logic here, not in user-data-stub.sh.tftpl.
 # `-e` removed: this script intentionally tolerates individual command failures
 # (each critical step has its own `|| true` / explicit error log). With `-e`,
-# any non-handled failure would abort bootstrap silently — including the AD-join
-# phase — leaving the instance unusable.
+# any non-handled failure would abort bootstrap silently - including the AD-join
+# phase - leaving the instance unusable.
 set -uo pipefail
 
 LOG=/var/log/lab-bootstrap.log
@@ -54,14 +54,14 @@ lab_install_efs_tool_profile_from_tf() {
   printf '%s' "$${cfg}" | jq -r '.ad_groups_any[]?' 2>/dev/null | tr -d '\r' | sed '/^$/d' | head -n 128 >"$${gf}" || true
   local gate_ok=1
   local defer_per_user=0
-  # Learner AD accounts are created by the backend (LDAP) after StartLab SSH — not during cloud-init.
-  # Never block LabBootstrap=READY on id/getent for session_user (was 40×15s ≈ 10 min).
+  # Learner AD accounts are created by the backend (LDAP) after StartLab SSH - not during cloud-init.
+  # Never block LabBootstrap=READY on id/getent for session_user (was 40x15s ? 10 min).
   if [ -s "$${gf}" ]; then
     gate_ok=0
     local max_try=6
     local poll_sec=5
     local n=0
-    lab_log "efs_tool_profile: quick NSS probe for $${su} (max $${max_try}×$${poll_sec}s; account may appear only after backend AD provision)"
+    lab_log "efs_tool_profile: quick NSS probe for $${su} (max $${max_try}x$${poll_sec}s; account may appear only after backend AD provision)"
     while [ "$${n}" -lt "$${max_try}" ]; do
       n=$(awk -v k="$${n}" 'BEGIN{print k+1}')
       resolved=""
@@ -96,7 +96,7 @@ lab_install_efs_tool_profile_from_tf() {
       [ "$${n}" -lt "$${max_try}" ] && sleep "$${poll_sec}"
     done
     if [ "$${gate_ok}" != "1" ]; then
-      lab_log "WARN efs_tool_profile: $${su} not in AD during bootstrap — installing global tool env only; per-user hooks deferred (backend creates AD user on StartLab)"
+      lab_log "WARN efs_tool_profile: $${su} not in AD during bootstrap - installing global tool env only; per-user hooks deferred (backend creates AD user on StartLab)"
       gate_ok=1
       defer_per_user=1
       resolved=""
@@ -248,7 +248,7 @@ INSTANCE_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
   "http://169.254.169.254/latest/meta-data/instance-id" || hostname)
 
 # Pin AWS region for CLI and for SSM document workers (AWS-JoinDirectoryServiceDomain runs
-# `aws ds …` on the instance). If AWS_DEFAULT_REGION is unset, boto3/awscli default to
+# `aws ds ...` on the instance). If AWS_DEFAULT_REGION is unset, boto3/awscli default to
 # us-east-1, DescribeDirectories returns empty, and the document fails with:
 #   "Cannot find parent directory Id"
 # even when LabSSMRole has AmazonSSMDirectoryServiceAccess (ap-south-1 directory).
@@ -270,14 +270,14 @@ SSMENV
 systemctl daemon-reload 2>/dev/null || true
 # The agent process must restart to pick up Environment= from the drop-in. If we only
 # reload+restart much later (AD phase), the backend's explicit AWS-JoinDirectoryServiceDomain
-# SendCommand right after Terraform apply runs first — `aws ds describe-directories` then
-# defaults to us-east-1 → "Cannot find parent directory Id" even for an ap-south-1 directory.
+# SendCommand right after Terraform apply runs first - `aws ds describe-directories` then
+# defaults to us-east-1 -> "Cannot find parent directory Id" even for an ap-south-1 directory.
 lab_log "ssm: restart amazon-ssm-agent immediately after region drop-in (before any Run Command)"
 systemctl restart amazon-ssm-agent.service 2>/dev/null || systemctl restart amazon-ssm-agent 2>/dev/null || true
 
 # AWS CLI v1 uses ~/.aws/config [default] region. Some SSM workers do not inherit systemd
 # Environment=; without this, AWS-JoinDirectoryServiceDomain still calls `aws ds` in us-east-1.
-# LAB_AWSCLI_ROOT_CONFIG — marker for backend clone patcher (h).
+# LAB_AWSCLI_ROOT_CONFIG - marker for backend clone patcher (h).
 install -d /root/.aws
 cat >/root/.aws/config <<LAB_AWSCFG
 [default]
@@ -298,7 +298,7 @@ fi
 
 lab_log "start instance_id=$INSTANCE_ID enable_ad_join=${enable_ad_join} ad_mechanism=${ad_join_mechanism} dcv_console=${dcv_use_console_sessions}"
 
-# AMI ships ~8G LVM root on 30–40G EBS — expand before any writes or AD join (keytab needs /tmp).
+# AMI ships ~8G LVM root on 30-40G EBS - expand before any writes or AD join (keytab needs /tmp).
 lab_log "inline root disk expand (AMI ships ~8G root on larger EBS)"
 if [ -b /dev/nvme0n1p2 ]; then
   command -v growpart >/dev/null 2>&1 && growpart /dev/nvme0n1 2 2>&1 || true
@@ -363,7 +363,7 @@ sed -i '\|/[[:space:]]*/AL[[:space:]]|d' /etc/fstab 2>/dev/null || true
 %{ if trimspace(lab_efs_nfs_host) != "" ~}
 sed -i '\|${trimspace(lab_efs_nfs_host)}|d' /etc/fstab 2>/dev/null || true
 %{ endif ~}
-lab_log "EFS fstab: removed legacy entries only (no new fstab lines — PD/DV/AL via lab-efs-mount.service)"
+lab_log "EFS fstab: removed legacy entries only (no new fstab lines - PD/DV/AL via lab-efs-mount.service)"
 
 # DO NOT call `cloud-init status --wait` here. This script IS executed by
 # cloud-init's modules-final stage, so waiting for cloud-init to reach `done`
@@ -376,7 +376,7 @@ systemctl enable sshd
 systemctl restart sshd
 
 %{ if trimspace(lab_ssh_public_key_b64) != "" ~}
-# Optional: embed lab SSH pubkey in user-data (disabled by default — exceeds EC2 16 KiB gzip budget).
+# Optional: embed lab SSH pubkey in user-data (disabled by default - exceeds EC2 16 KiB gzip budget).
 # Backend injects the same key via SSM after the instance is up.
 lab_log "install lab SSH pubkey from Terraform (base64 payload; no aws_key_pair)"
 LAB_B64='${lab_ssh_public_key_b64}'
@@ -455,7 +455,7 @@ lab_log "lab SSH pubkey: skipped in user-data (backend SSM inject); keeps gzip u
 
 # AD + aws RPMs BEFORE EFS: nfs-utils (mount.nfs4), bind-utils (host/getent), awscli (DescribeMountTargets when VPC DNS fails on EFS hostname).
 # tcsh/csh: required for learner DCV shells (SSSD default_shell often /bin/tcsh on PD/AL/DV labs).
-# Golden AMI: dnf/rpm SIGBUS on corrupt Berkeley DB; binaries are pre-baked — never dnf at boot.
+# Golden AMI: dnf/rpm SIGBUS on corrupt Berkeley DB; binaries are pre-baked - never dnf at boot.
 lab_log "early packages: binary check only (no dnf/rpm at boot)"
 EARLY_MISSING=""
 for b in realm adcli oddjobd sssd tcsh csh curl unzip aws; do
@@ -471,16 +471,16 @@ fi
 if command -v tcsh >/dev/null 2>&1; then
   lab_log "tcsh present: $(tcsh --version 2>&1 | head -1)"
 else
-  lab_log "WARN tcsh not installed — install tcsh package for learner terminals"
+  lab_log "WARN tcsh not installed - install tcsh package for learner terminals"
 fi
 
 # Standalone post-OS disk expansion script and systemd service
 cat >/usr/local/sbin/lab-disk-expand.sh <<'LABDISKEXPAND'
 #!/bin/bash
-# post‑OS disk expansion – idempotent
+# post-OS disk expansion - idempotent
 set -uo pipefail
 LOG=/var/log/lab-bootstrap.log
-echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [lab-disk-expand] starting post‑OS disk expansion..." | tee -a "$LOG"
+echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] [lab-disk-expand] starting post-OS disk expansion..." | tee -a "$LOG"
 if command -v growpart >/dev/null 2>&1; then
   growpart /dev/nvme0n1 2 2>&1 | tee -a "$LOG" || true
 fi
@@ -516,7 +516,7 @@ systemctl enable lab-disk-expand.service 2>/dev/null || true
 # Always install tcsh/csh login profile handoff and csh system env hooks
 cat >/etc/profile.d/zz-lab-efs-tools.sh <<'ZZLABEFS'
 # Lab PD/AL/DV vendor env: pdsource, alsource, dvsource are tcsh/csh (setenv, set path = (...)).
-# Never `.` them in bash — use zz-lab-efs-tools.csh or login tcsh instead.
+# Never `.` them in bash - use zz-lab-efs-tools.csh or login tcsh instead.
 lab_efs_tools_profile_sh() {
   command -v tcsh >/dev/null 2>&1 || return 0
   [ -n "$${PS1:-}" ] || return 0
@@ -568,7 +568,7 @@ foreach f (`grep -v '^[[:space:]]*#' /etc/lab/efs-tool-sources.lst | grep -v '^[
     source "$f"
   endif
 end
-# pdsource sets ICC2_HOME under /efs/tools/PD/... — prefer /PD/... bind mount (do not use $?ICC2_HOME: tcsh treats $? as exit status).
+# pdsource sets ICC2_HOME under /efs/tools/PD/... - prefer /PD/... bind mount (do not use $?ICC2_HOME: tcsh treats $? as exit status).
 if ( "$ICC2_HOME" != "" ) then
   set _iccfix = `echo "$ICC2_HOME" | sed \
     -e 's|^/efs/tools/PD|/PD|' \
@@ -605,9 +605,9 @@ fi
 lab_log "installed SSSD/tcsh shell handoff profiles unconditionally"
 
 # EFS: runtime nfs4 mount only (IT: no vi /etc/fstab line for 10.x:/ /efs). lab-efs-mount.service
-# mounts server:/tools/PD → /PD (etc.) after network-online; lab-efs-tool-env.sh sources pdsource/….
+# mounts server:/tools/PD -> /PD (etc.) after network-online; lab-efs-tool-env.sh sources pdsource/....
 %{ if trimspace(lab_efs_nfs_host) != "" ~}
-# Golden AMI often ships /tools as a regular file — blocks nfs4 mount of EFS :/tools.
+# Golden AMI often ships /tools as a regular file - blocks nfs4 mount of EFS :/tools.
 if [ -e /tools ] && [ ! -d /tools ]; then
   lab_log "AMI: /tools is not a directory ($(file -b /tools 2>/dev/null || echo unknown)); moving aside for EFS"
   mv /tools /tools.ami-file.bak 2>/dev/null || rm -f /tools 2>/dev/null || true
@@ -806,7 +806,7 @@ lab_efs_mount_efs_root_for_cad2k() {
   lab_efs_log "WARN mount $${server}:/ -> /efs failed (cad2k symlinks in pdsource may fail)"
   return 1
 }
-# pdsource uses ICC2_HOME=/efs/tools/<PD|AL|DV>/... — symlink when /efs is not nfs-mounted.
+# pdsource uses ICC2_HOME=/efs/tools/<PD|AL|DV>/... - symlink when /efs is not nfs-mounted.
 lab_efs_ensure_legacy_efs_paths() {
   local c
   lab_efs_prepare_mount_point /efs || return 0
@@ -836,7 +836,7 @@ lab_efs_complete_vendor_layout() {
   lab_efs_log "layout: PD|DV|AL=/$TOOLS_LIST /tools=nfs /efs/tools/<code>=symlink or share"
 }
 # Shared EFS: binaries may be 755 but parent dirs 750 block AD UIDs (staging/prod AD both OK on one EFS).
-# Recursive chmod on multi-TB NFS trees can run for hours and block cloud-init — never do that synchronously
+# Recursive chmod on multi-TB NFS trees can run for hours and block cloud-init - never do that synchronously
 # during bootstrap (LabBootstrap=READY / AD join must proceed).
 lab_efs_chmod_tree() {
   local p="$1" rc=0
@@ -852,7 +852,7 @@ lab_efs_chmod_tree() {
     return 0
   fi
   if [ "$rc" -eq 124 ] 2>/dev/null || [ "$rc" -eq 143 ] 2>/dev/null; then
-    lab_efs_log "WARN EFS chmod timed out (600s) on $p — tree may still be traversing in background; top-level a+rx already applied"
+    lab_efs_log "WARN EFS chmod timed out (600s) on $p - tree may still be traversing in background; top-level a+rx already applied"
   else
     lab_efs_log "WARN EFS chmod failed rc=$rc on $p"
   fi
@@ -874,7 +874,7 @@ lab_efs_open_binaries_for_nfs_users() {
       lab_efs_chmod_tree "$p" && n=$((n + 1)) || true
     done
   fi
-  lab_efs_log "EFS learner traverse+execute: finished pass (updated $n trees; one EFS / many AD domains — numeric UID only)"
+  lab_efs_log "EFS learner traverse+execute: finished pass (updated $n trees; one EFS / many AD domains - numeric UID only)"
 }
 lab_efs_open_binaries_for_nfs_users_background() {
   lab_efs_log "EFS learner chmod: deferring recursive a+rX to background (do not block LabBootstrap / AD join on NFS)"
@@ -940,7 +940,7 @@ lab_efs_run_mount_pass() {
   lab_efs_bind_tools || return 1
   lab_efs_verify_required_mounts
 }
-# IT pattern: after binds (or direct subpath mounts), drop /efs so learners browse /PD only — not via fstab.
+# IT pattern: after binds (or direct subpath mounts), drop /efs so learners browse /PD only - not via fstab.
 lab_efs_hide_efs_root() {
   [ -n "$(echo $TOOLS_LIST | tr -d '[:space:]')" ] || return 0
   chmod 700 /efs 2>/dev/null || true
@@ -948,7 +948,7 @@ lab_efs_hide_efs_root() {
     if umount /efs 2>&1 | tee -a "$LOG"; then
       lab_efs_log "umount /efs OK (learners use /PD|/DV|/AL only; /efs not listed)"
     else
-      lab_efs_log "WARN umount /efs failed — /efs may stay mounted; tightened mode 700 on /efs"
+      lab_efs_log "WARN umount /efs failed - /efs may stay mounted; tightened mode 700 on /efs"
     fi
   fi
 }
@@ -970,7 +970,7 @@ lab_efs_bind_tools() {
       /usr/local/sbin/lab-efs-tool-env.sh 2>/dev/null || true
       return 0
     fi
-    lab_efs_log "direct subpath: ok=$ok fail=$fail — falling back to /efs root + bind"
+    lab_efs_log "direct subpath: ok=$ok fail=$fail - falling back to /efs root + bind"
   fi
   if ! lab_efs_nfs_mounted; then
     return 1
@@ -1012,7 +1012,7 @@ while [ "$_pass" -le "$_max_pass" ]; do
   sleep 20
   _pass=$((_pass + 1))
 done
-lab_efs_log "FAIL EFS mounts after $_max_pass attempts — check network, SG 2049, mount target"
+lab_efs_log "FAIL EFS mounts after $_max_pass attempts - check network, SG 2049, mount target"
 exit 1
 LABEFSMOUNT
 chmod +x /usr/local/sbin/lab-efs-mount.sh
@@ -1115,7 +1115,7 @@ chmod +x /usr/local/sbin/lab-efs-tool-env.sh
 
 cat >/etc/systemd/system/lab-efs-mount.service <<'LABEFSSVC'
 [Unit]
-Description=Lab EFS nfs4 root and tool bind mounts (/efs, /PD, …)
+Description=Lab EFS nfs4 root and tool bind mounts (/efs, /PD, ...)
 After=network-online.target
 Wants=network-online.target
 Before=remote-fs.target
@@ -1147,7 +1147,7 @@ chmod 644 /etc/cron.d/semiconlabs-lab-efs-mount 2>/dev/null || true
 systemctl daemon-reload || true
 systemctl enable lab-efs-mount.service 2>/dev/null || true
 lab_log "EFS: enabled lab-efs-mount.service + @reboot cron (no fstab; remount every boot)"
-# Do not block AD join on NFS: sync mount was 6×90s timeouts (~15 min) before LabBootstrap=READY.
+# Do not block AD join on NFS: sync mount was 6x90s timeouts (~15 min) before LabBootstrap=READY.
 lab_log "EFS: starting lab-efs-mount.service in background (AD join is critical path)"
 systemctl start lab-efs-mount.service 2>/dev/null &
 %{ else ~}
@@ -1165,7 +1165,7 @@ if [[ "$LAB_SSSD_SH" == *tcsh* ]]; then
 fi
 export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:$PATH"
 
-# AWS CLI v2 — use lab_aws() for all CLI calls (prefers /usr/local/bin/aws after successful zip install).
+# AWS CLI v2 - use lab_aws() for all CLI calls (prefers /usr/local/bin/aws after successful zip install).
 lab_ensure_awscli_v2 || true
 if [ -x /usr/local/bin/aws ]; then
   export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
@@ -1181,7 +1181,7 @@ lab_aws() {
   fi
 }
 # Terraform: use a single `$` before `(` for bash $(...). Writing `$$` before `(` can leave
-# literal `$$` in rendered user_data → bash treats `$$` as PID and errors near `(`.
+# literal `$$` in rendered user_data -> bash treats `$$` as PID and errors near `(`.
 LAB_AWS_BOOT_LINE=$(lab_aws --version 2>&1 | head -1) || LAB_AWS_BOOT_LINE='(lab_aws failed)'
 lab_log "bootstrap aws: $LAB_AWS_BOOT_LINE"
 
@@ -1214,9 +1214,9 @@ fi
 
 lab_log "AD client packages: already installed in early dnf/yum block (reinstall skipped here)"
 
-# CloudLabs NICE DCV + AD guide — lab-docs/_dcv_doc_snippet.txt Section 4.5 (verbatim layout; Terraform fills domain/realm/shell).
+# CloudLabs NICE DCV + AD guide - lab-docs/_dcv_doc_snippet.txt Section 4.5 (verbatim layout; Terraform fills domain/realm/shell).
 lab_write_sssd_conf_cloudlabs_doc() {
-  lab_log "sssd: Step 4.5 — write /etc/sssd/sssd.conf (joined-with-adcli) per CloudLabs DCV guide"
+  lab_log "sssd: Step 4.5 - write /etc/sssd/sssd.conf (joined-with-adcli) per CloudLabs DCV guide"
   cat >/etc/sssd/sssd.conf <<'SSSDCLOUDLABS'
 [sssd]
 domains = ${ad_domain}
@@ -1241,7 +1241,7 @@ SSSDCLOUDLABS
 }
 
 %{ if ad_join_mechanism == "ssm_aws_managed" ~}
-# JoinDirectoryServiceDomain only runs via SSM once the managed instance reports Online — ensure agent is up early.
+# JoinDirectoryServiceDomain only runs via SSM once the managed instance reports Online - ensure agent is up early.
 lab_log "ssm_aws_managed: enable/restart amazon-ssm-agent (required before directory join document)"
 systemctl enable amazon-ssm-agent.service 2>/dev/null || systemctl enable amazon-ssm-agent 2>/dev/null || true
 systemctl restart amazon-ssm-agent 2>/dev/null || lab_log "WARN could not restart amazon-ssm-agent (non-fatal)"
@@ -1249,7 +1249,7 @@ systemctl restart amazon-ssm-agent 2>/dev/null || lab_log "WARN could not restar
 # IMPORTANT: we do NOT call `aws ssm describe-instance-information` here.
 # That API requires `ssm:DescribeInstanceInformation`, which is NOT in
 # `AmazonSSMManagedInstanceCore`. With the default instance role the call
-# returns AccessDenied → silently empty PingStatus → false 300/900s timeout.
+# returns AccessDenied -> silently empty PingStatus -> false 300/900s timeout.
 # A LOCAL health check is exactly as good: once the agent is active and has
 # successfully exchanged credentials with AWS, the managed instance will be
 # reported Online to Fleet Manager and the association will deliver.
@@ -1257,7 +1257,7 @@ lab_log "ssm_aws_managed: wait for amazon-ssm-agent local readiness (no AWS API 
 SSM_ONLINE_DEADLINE=$(( $(date +%s) + 300 ))
 SSM_SEEN_GOOD=""
 # Readiness signals that work for EC2 instance-role identity (no
-# /var/lib/amazon/ssm/Vault/Store/RegistrationKey — that file is only
+# /var/lib/amazon/ssm/Vault/Store/RegistrationKey - that file is only
 # created for on-prem / hybrid activation).
 #
 # IMPORTANT: this script runs with `set -uo pipefail`. Any pipe stage
@@ -1265,7 +1265,7 @@ SSM_SEEN_GOOD=""
 # poisons the pipeline's exit code, so an earlier "{ journalctl; tail; }
 # | grep -q" version of this function silently returned 1 every time
 # when /var/log/amazon/ssm/amazon-ssm-agent.log hadn't been written
-# yet — even though the agent was perfectly healthy and journald had
+# yet - even though the agent was perfectly healthy and journald had
 # `Credentials ready`. We test each source INDEPENDENTLY now, and try
 # several known log-file paths (location varies across agent versions
 # and AMIs).
@@ -1290,16 +1290,16 @@ if [ "$SSM_SEEN_GOOD" = "yes" ]; then
   # IMPORTANT: Terraform creates `aws_ssm_association` only AFTER
   # `time_sleep.wait_ssm_registration_after_ec2` (same duration as this var).
   # A short sleep here made user-data poll for realm while NO association existed
-  # yet (~2 minute blind window vs 180s TF delay → empty realm_list on lab 137).
+  # yet (~2 minute blind window vs 180s TF delay -> empty realm_list on lab 137).
   lab_log "ssm_aws_managed: agent locally healthy; settling ${ad_ssm_association_delay} (matches Terraform association delay, then polling for join)"
   sleep ${ad_ssm_association_delay}
 else
-  lab_log "WARN ssm_aws_managed: agent local readiness markers not seen in 300s — proceeding (State Manager may still deliver join document)"
+  lab_log "WARN ssm_aws_managed: agent local readiness markers not seen in 300s - proceeding (State Manager may still deliver join document)"
 fi
 %{ endif ~}
 
 # Ensure cloud / DCV users can run lab admin commands (sudo dcv create-session,
-# adcli, sssd restart) WITHOUT a TTY — golden AMIs don't always ship a
+# adcli, sssd restart) WITHOUT a TTY - golden AMIs don't always ship a
 # NOPASSWD sudoers drop-in, and `ssh ... centos@host "sudo dcv ..."` runs
 # without a controlling terminal so it fails with "sudo: a terminal is required
 # to read the password". Idempotent.
@@ -1326,7 +1326,7 @@ LAB_SUDO_EOF
   chmod 0440 /etc/sudoers.d/95-lab-cloud-users
   lab_log "installed /etc/sudoers.d/95-lab-cloud-users (NOPASSWD for cloud/DCV users)"
 fi
-# Older labs: file exists without ssm-user — append so DCV over SSH as ssm-user matches centos.
+# Older labs: file exists without ssm-user - append so DCV over SSH as ssm-user matches centos.
 if [ -f /etc/sudoers.d/95-lab-cloud-users ] && ! grep -qE '^ssm-user[[:space:]]' /etc/sudoers.d/95-lab-cloud-users 2>/dev/null; then
   printf '\n# Lab append: DCV/SSM over non-interactive SSH\nDefaults:ssm-user !requiretty\nssm-user ALL=(ALL) NOPASSWD: ALL\n' >>/etc/sudoers.d/95-lab-cloud-users
   chmod 0440 /etc/sudoers.d/95-lab-cloud-users
@@ -1432,7 +1432,7 @@ else
   ADCLI_SAM_J='${ad_join_user}'
   case "$${ADCLI_SAM_J}" in *@*) ADCLI_SAM_J="$${ADCLI_SAM_J%%@*}";; esac
 
-  # Step 4.4 — Join the Domain (guide uses: echo 'PASSWORD' | sudo adcli join ... ; we use printf for safe newlines).
+  # Step 4.4 - Join the Domain (guide uses: echo 'PASSWORD' | sudo adcli join ... ; we use printf for safe newlines).
   do_adcli_join_cloudlabs_doc() {
     chronyc makestep 2>/dev/null || true
 %{ if ad_computer_ou != "" ~}
@@ -1448,7 +1448,7 @@ else
     lab_write_sssd_conf_cloudlabs_doc
     lab_finalize_sssd_for_dcv
   else
-    lab_log "ERROR realm_userdata: adcli join failed after retries (guide: Steps 4.2–4.4, password, chronyc makestep)" >&2
+    lab_log "ERROR realm_userdata: adcli join failed after retries (guide: Steps 4.2-4.4, password, chronyc makestep)" >&2
     LAB_AD_JOIN_OK=0
   fi
   unset JOIN_PW
@@ -1523,7 +1523,7 @@ if [ "$${JOINED}" != "1" ]; then
           lab_write_sssd_conf_cloudlabs_doc
           break
         fi
-        lab_log "WARN ad_fallback_adcli: adcli join attempt $${FB_ATT} failed — retry in 60s"
+        lab_log "WARN ad_fallback_adcli: adcli join attempt $${FB_ATT} failed - retry in 60s"
         FB_ATT=$((FB_ATT + 1))
         sleep 60
       done
@@ -1569,8 +1569,8 @@ lab_log "AD phase finished"
 
 lab_log "DCV: /etc dcvserver.service (strip [Service] ExecStartPre) + late drop-in + dcv.conf boot auto-session=false web_all=${dcv_web_listen_all} (tf dcv_use_console_sessions=${dcv_use_console_sessions})"
 # 1) Copy vendor unit to /etc; strip ExecStartPre inside [Service] (el8 drop-ins do not remove main-unit lines).
-# 2) Vendor /usr/lib/.../dcvserver.service.d/*.conf may sort AFTER zzz-lab-… and re-add fatal modprobe — rename our
-#    fragment to zzzzzzzz-… so it sorts last, and quarantine any vendor .conf that sets ExecStartPre+modprobe.
+# 2) Vendor /usr/lib/.../dcvserver.service.d/*.conf may sort AFTER zzz-lab-... and re-add fatal modprobe - rename our
+#    fragment to zzzzzzzz-... so it sorts last, and quarantine any vendor .conf that sets ExecStartPre+modprobe.
 DCV_VENDOR=""
 for f in /usr/lib/systemd/system/dcvserver.service /lib/systemd/system/dcvserver.service; do
   if [ -f "$${f}" ]; then DCV_VENDOR="$${f}"; break; fi
@@ -1578,7 +1578,7 @@ done
 if [ -n "$${DCV_VENDOR}" ]; then
   tr -d '\r' < "$${DCV_VENDOR}" | awk '/^\[/ { ins = ($$0 == "[Service]" || $$0 ~ /^\\[Service\\][[:space:]]*$$/) ? 1 : 0 } ins && $$0 ~ /^[[:space:]]*ExecStartPre[[:space:]]*=/ { next } { print }' > /etc/systemd/system/dcvserver.service
   if [ ! -s /etc/systemd/system/dcvserver.service ]; then
-    lab_log "ERROR DCV: /etc/systemd/system/dcvserver.service is empty after vendor copy — removing corrupt file (masked/broken unit otherwise)"
+    lab_log "ERROR DCV: /etc/systemd/system/dcvserver.service is empty after vendor copy - removing corrupt file (masked/broken unit otherwise)"
     rm -f /etc/systemd/system/dcvserver.service
   else
     lab_log "DCV: wrote /etc/systemd/system/dcvserver.service from $${DCV_VENDOR} (ExecStartPre stripped in [Service])"
@@ -1608,14 +1608,11 @@ systemctl daemon-reload
 systemctl reset-failed dcvserver 2>/dev/null || true
 
 # DCV must NOT auto-create a session at boot with a bogus owner. "%user%" in AWS/CloudLabs
-# samples is documentation shorthand, not a DCV substitution — it breaks login (owner:%user%).
+# samples is documentation shorthand, not a DCV substitution - it breaks login (owner:%user%).
 # Named virtual sessions are created by the app backend after SSH, e.g.:
 #   sudo dcv create-session 'SumedhaIT_<user>' --owner '<upn>' --user '<posix>' --type virtual
 # See lab-docs/_dcv_doc_snippet.txt Step 3.3 (create-session=false).
 cat >/etc/dcv/dcv.conf <<'DCVBASE'
-[server]
-client-eviction-policy = "same-user-oldest-connection"
-
 [security]
 authentication="system"
 pam-service-name="dcv"
@@ -1625,13 +1622,22 @@ create-session = false
 # Virtual sessions default to dcv-gl "default-on", which requires a DCV-GL license; without it the
 # X session often exits immediately and list-sessions stays empty after create-session returns 0.
 enable-gl-in-virtual-sessions = always-off
+# Newest browser wins. max-concurrent-clients (1 client per session) belongs in
+# [session-management]; client-eviction-policy belongs in the
+# [session-management/automatic-console-session] subsection (NOT [server] or
+# [connectivity], where DCV silently ignores it and defaults to reject).
+max-concurrent-clients = 1
+
+[session-management/automatic-console-session]
+client-eviction-policy = "same-user-oldest-connection"
+max-concurrent-clients = 1
 
 [display]
 max-num-heads=1
 enable-client-resize=true
 
 [log]
-log-level=debug
+log-level=info
 
 DCVBASE
 
@@ -1645,7 +1651,7 @@ enable-quic-frontend=false
 idle-timeout=0
 EOF
 
-# Block DCV client ↔ VM clipboard only; in-session copy/paste inside the desktop still works.
+# Block DCV client ? VM clipboard only; in-session copy/paste inside the desktop still works.
 cat >/etc/dcv/default.perm <<'DCVPERM'
 [permissions]
 %any% deny clipboard-copy clipboard-paste
@@ -1655,7 +1661,7 @@ lab_log "DCV: installed /etc/dcv/default.perm (deny client clipboard-copy/paste 
 # DCV 2025 + Type=dbus: websocket path uses AF_INET6. ipv6.disable=1 in kernel cmdline removes the whole stack
 # (/proc/sys/net/ipv6 never appears; modprobe ipv6 cannot fix until grub is updated and the instance reboots).
 if grep -q 'ipv6.disable=1' /proc/cmdline 2>/dev/null; then
-  lab_log "ERROR_LAB_KERN_IPV6_OFF: /proc/cmdline contains ipv6.disable=1 — DCV will not stay up; relaunching the same AMI does not help."
+  lab_log "ERROR_LAB_KERN_IPV6_OFF: /proc/cmdline contains ipv6.disable=1 - DCV will not stay up; relaunching the same AMI does not help."
   lab_log "FIX (one-time on instance): grubby --update-kernel=ALL --remove-args=ipv6.disable=1 && reboot  (AMI: drop ipv6.disable from /etc/default/grub before bake.)"
 else
   if modprobe ipv6 2>/tmp/dcv.ipv6.err; then
@@ -1674,7 +1680,7 @@ else
       sysctl -w net.ipv6.conf.lo.disable_ipv6=0 2>/dev/null || true
     fi
   else
-    lab_log "WARN DCV: /proc/sys/net/ipv6 missing (no ipv6.disable=1 in cmdline) — check CONFIG_IPV6 / ipv6.ko on AMI"
+    lab_log "WARN DCV: /proc/sys/net/ipv6 missing (no ipv6.disable=1 in cmdline) - check CONFIG_IPV6 / ipv6.ko on AMI"
   fi
 fi
 
@@ -1737,12 +1743,12 @@ lab_aws ec2 create-tags \
   lab_log "WARN ec2 create-tags LabBootstrap=$${LAB_BOOTSTRAP_TAG} failed (broken awscli?)"
 
 if [ "$${LAB_BOOTSTRAP_TAG}" = "READY" ]; then
-  lab_log "BOOTSTRAP COMPLETE — verify AD: getent passwd <user>; sssctl domain-status; DCV: ss -tlnp | grep 8443; log=$LOG"
+  lab_log "BOOTSTRAP COMPLETE - verify AD: getent passwd <user>; sssctl domain-status; DCV: ss -tlnp | grep 8443; log=$LOG"
   echo "========== BOOTSTRAP COMPLETE =========="
 %{ if enable_ad_join ~}
   lab_install_efs_tool_profile_background || true
 %{ endif ~}
 else
-  lab_log "BOOTSTRAP FAILED — AD join required for learner DCV; log=$LOG"
+  lab_log "BOOTSTRAP FAILED - AD join required for learner DCV; log=$LOG"
   echo "========== BOOTSTRAP FAILED (AD) =========="
 fi

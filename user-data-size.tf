@@ -2,7 +2,7 @@
 data "external" "lab_user_data_payload" {
   program = ["node", "${path.module}/scripts/gzip-b64-payload-len.js"]
   query = {
-    b64 = local.lab_user_data_gzip_b64
+    b64 = data.cloudinit_config.lab.rendered
   }
 }
 

@@ -32,9 +32,13 @@ locals {
     lab_bootstrap_log_group                   = var.lab_bootstrap_log_group
     lab_monitoring_enabled                    = var.lab_monitoring_enabled
     lab_bootstrap_monitoring_script           = var.lab_monitoring_enabled ? templatefile("${path.module}/lab-bootstrap-monitoring.sh.tftpl", {
-      aws_region              = var.aws_region
-      lab_bootstrap_log_group = var.lab_bootstrap_log_group
-      lab_environment         = var.lab_environment
+      aws_region                = var.aws_region
+      lab_bootstrap_log_group   = var.lab_bootstrap_log_group
+      lab_environment           = var.lab_environment
+      lab_health_log_group      = var.lab_health_log_group
+      lab_health_interval_min   = var.lab_health_interval_min
+      lab_health_mem_alert_pct  = var.lab_health_mem_alert_pct
+      lab_health_disk_alert_pct = var.lab_health_disk_alert_pct
     }) : ""
   })
   ci_user_data_gzip_b64 = base64gzip(local.ci_user_data_rendered)

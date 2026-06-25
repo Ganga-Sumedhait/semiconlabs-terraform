@@ -1,11 +1,12 @@
-# DCV www UX patch (v3) for running lab EC2 instances
+# DCV www UX patch (v9) for running lab EC2 instances
 
 ## What it does
 
-1. Sets `client-eviction-policy = "same-user-oldest-connection"` (webapp-like: new DCV browser login evicts the oldest connection for the same owner).
-2. Reverts v2 `reject-new-connection` policy and custom duplicate-session message text.
-3. Keeps **only** v1 revert fixes for mistaken `"The connection has been closed"` replacements.
-4. Injects `custom-popup.js` (Stop Lab reminder on first opens).
+1. Ensures `max-concurrent-clients = 1` in `[session-management]` and `client-eviction-policy = "same-user-oldest-connection"` in `[session-management/automatic-console-session]` (DCV ignores these in `[connectivity]` / `[server]`).
+2. Injects `lab-stale-tab-guard.js` (v9) and `custom-popup.js` into `/usr/share/dcv/www/`.
+3. Reverts mistaken duplicate-session message text to standard DCV **The connection has been closed**.
+
+**Multi-browser takeover** (browser 2 logs in, browser 1 evicted) is enforced by the **backend SSM eviction** triggered when browser 2 loads `/lab/<token>/` through dcv-router. The dcv.conf settings above are belt-and-suspenders; virtual sessions rely on the backend path.
 
 Sessions already use `--max-concurrent-clients 1` from the backend.
 
@@ -13,14 +14,14 @@ Sessions already use `--max-concurrent-clients 1` from the backend.
 
 | Scenario | Result |
 |----------|--------|
-| DCV active in browser 1, same user logs in via DCV URL in browser 2 | Browser 1 disconnected; browser 2 connects |
+| DCV active in browser 1, same user opens lab URL in browser 2 | Backend evicts browser 1 via SSM; browser 2 connects |
 | Browser 1 after eviction | **The connection has been closed** (standard DCV) |
-| Stop Lab, return to old DCV tab | **The connection has been closed** (original) |
-| First Open Lab | Portal OK dialog + `custom-popup.js` alert (unchanged) |
+| Stop Lab, return to old DCV tab | **The connection has been closed** |
+| First Open Lab | Portal OK dialog + `custom-popup.js` alert |
 
 ## Automatic
 
-Deploy backend with v3 SSM patch. Reconcile cron / Start Lab runs SSM when `connection_details.dcv_www_ux_patch_v3` is not set (v2-only instances are upgraded).
+Deploy backend with v9 SSM patch. Reconcile cron / Start Lab runs SSM when `connection_details.dcv_guard_rev` is not current.
 
 `LAB_PATCH_DCV_WWW_UX_ENABLED=false` disables.
 
@@ -33,4 +34,4 @@ cd semiconlabs-terraform\scripts
 
 ## New instances
 
-`user-data.sh.tftpl` / `bootstrap-full.sh.tftpl` apply v3 at bootstrap (`same-user-oldest-connection`).
+`user-data.sh.tftpl` applies v9 at bootstrap (correct `[session-management]` dcv.conf + guard scripts). Requires backend + dcv-router with path-based page-nav takeover (`X-Lab-Page-Nav`).

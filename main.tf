@@ -62,7 +62,16 @@ locals {
       lab_health_disk_alert_pct = var.lab_health_disk_alert_pct
     }) : ""
   }))
-  lab_user_data_gzip_b64 = base64gzip(local.lab_user_data_rendered)
+
+  # cloud-boothook: runs EARLY in the cloud-init init stage (before the heavy
+  # init/final work), so it executes even when the AMI ships an ~8G LVM root
+  # that is already ~99% full. Without this, cloud-init crashes on "No space
+  # left on device" while writing its own status, and the main bootstrap
+  # (text/x-shellscript part) in cloud-final never runs. We free the stale
+  # pcp logs baked into the AMI, then grow the partition + LVM root so the
+  # rest of bootstrap has room. growpart/lvextend are idempotent (no-op once
+  # the LV already fills the disk), so running on every boot is safe.
+  lab_disk_grow_boothook = file("${path.module}/disk-grow.boothook.sh")
 
   # TODO (post-prod): S3 bootstrap split — see bootstrap-full.sh.tftpl + user-data-stub.sh.tftpl
   # lab_bootstrap_s3_key     = "lab-bootstrap/bootstrap-full-${var.suffix}.sh"
@@ -70,6 +79,24 @@ locals {
   # lab_bootstrap_full_rendered = templatefile("${path.module}/bootstrap-full.sh.tftpl", local.lab_user_data_template_vars)
   # lab_user_data_rendered = templatefile("${path.module}/user-data-stub.sh.tftpl", { aws_region = var.aws_region, suffix = var.suffix, bootstrap_s3_uri = local.lab_bootstrap_s3_uri })
   # lab_user_data_gzip_b64 = base64gzip(local.lab_user_data_rendered)
+}
+
+# Multipart user-data: boothook (early disk grow) + main bootstrap shell script.
+data "cloudinit_config" "lab" {
+  gzip          = true
+  base64_encode = true
+
+  part {
+    content_type = "text/cloud-boothook"
+    filename     = "00-disk-grow.sh"
+    content      = local.lab_disk_grow_boothook
+  }
+
+  part {
+    content_type = "text/x-shellscript"
+    filename     = "10-lab-bootstrap.sh"
+    content      = local.lab_user_data_rendered
+  }
 }
 
 # resource "aws_s3_object" "lab_bootstrap_full" {
@@ -113,7 +140,7 @@ resource "aws_instance" "CentOS8-AMD" {
   }
 
   # EC2 user_data gzip payload must be <= 16384 bytes (see user-data-size.tf).
-  user_data_base64 = local.lab_user_data_gzip_b64
+  user_data_base64 = data.cloudinit_config.lab.rendered
   tags = {
     Name            = local.lab_instance_display_name
     Environment     = var.env_tag

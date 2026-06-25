@@ -1,0 +1,6 @@
+# Lab bootstrap runs on Linux EC2 via cloud-init; CRLF breaks bash parsing
+# (heredoc terminators, "syntax error near unexpected token $'{\r'").
+# Force LF on all shell / templated-shell files regardless of OS checkout.
+*.sh        text eol=lf
+*.tftpl     text eol=lf
+*.bash      text eol=lf
